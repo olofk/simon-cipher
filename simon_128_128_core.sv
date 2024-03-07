@@ -2,7 +2,6 @@
 `define true  1'b1
 `define false 1'b0
 
-typedef int unsigned uint32_t;
 typedef enum logic [1:0] {
   SIMON_IDLE      = 2'b00,
   SIMON_KEYEXPAND = 2'b01,

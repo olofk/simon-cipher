@@ -11,8 +11,8 @@ typedef enum logic [1:0] {
 } simon_op_e /*verilator public*/;
 
 module simon_128_128_core #(
-   parameter int unsigned SIMON_ROUNDS = 68,
-   parameter int unsigned SIMON_ROUNDS_PER_CYCLE = 4
+   parameter bit [6:0] SIMON_ROUNDS = 7'd68,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
 ) (
     input  wire         clk, rst,
     // input ports
@@ -86,8 +86,8 @@ module simon_128_128_core #(
 endmodule;
 
 module simon_128_128_keyexpand #(
-   parameter int unsigned SIMON_ROUNDS = 68,
-   parameter int unsigned SIMON_ROUNDS_PER_CYCLE = 4
+   parameter bit [6:0] SIMON_ROUNDS = 7'd68,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
 ) (
    input  wire        clk, rst, enable,
    input  wire [7:0]  key_in [0:15],
@@ -240,8 +240,8 @@ module simon_128_128_keyexpand #(
 endmodule
 
 module simon_128_128_encryptor #(
-   parameter int unsigned SIMON_ROUNDS = 68,
-   parameter int unsigned SIMON_ROUNDS_PER_CYCLE = 4
+   parameter bit [6:0] SIMON_ROUNDS = 7'd68,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
 ) (
    input  wire          clk, rst, enable,
    input  wire  [127:0] enc_in,
@@ -252,15 +252,16 @@ module simon_128_128_encryptor #(
    output logic         input_acknowledged,
    output logic         output_valid
 );
+  typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE):0] xy_idx_t;
 
-  wire [63:0] y_words[0:SIMON_ROUNDS_PER_CYCLE];
-  wire [63:0] x_words[0:SIMON_ROUNDS_PER_CYCLE];
+  wire [63:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [63:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
   wire [63:0] x_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
   wire [63:0] y_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
   logic [63:0] y_ff;
   logic [63:0] x_ff;
   logic busy;
-  wire [63:0] temp[0:SIMON_ROUNDS_PER_CYCLE];
+  wire [63:0] temp[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
   wire [63:0] temp_tail[0:SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE];
 
   assign ready_o = !busy;
@@ -375,14 +376,14 @@ module simon_128_128_encryptor #(
           end
         end
         else begin
-          if ((!(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
+          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
               
             // In body, still have work to do -- perform an intermediate latch now
             busy <= busy;
             input_acknowledged = input_acknowledged;
             roundCount <= roundCount + SIMON_ROUNDS_PER_CYCLE;
-            y_ff <= y_words[SIMON_ROUNDS_PER_CYCLE];
-            x_ff <= x_words[SIMON_ROUNDS_PER_CYCLE];
+            y_ff <= y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
+            x_ff <= x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
           end
           else begin
             if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) begin
@@ -393,7 +394,7 @@ module simon_128_128_encryptor #(
               roundCount <= roundCount + (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE);
               y_ff <= y_ff; // Don't care
               x_ff <= x_ff; // Don't care
-              enc_out <= {x_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], y_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
+              enc_out <= {x_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], y_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
 `ifdef SIMON_DEBUG
               $display("%t ++++++ Simon ENC out (tail) ++++++", $time);
               $display("%t %m simon_enc.enc_out=0x%x", $time,
@@ -410,7 +411,7 @@ module simon_128_128_encryptor #(
               roundCount <= roundCount + SIMON_ROUNDS_PER_CYCLE; 
               y_ff <= y_ff; // Don't care
               x_ff <= x_ff; // Don't care
-              enc_out <= {x_words[SIMON_ROUNDS_PER_CYCLE], y_words[SIMON_ROUNDS_PER_CYCLE]};
+              enc_out <= {x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)], y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)]};
 `ifdef SIMON_DEBUG
               $display("%t ++++++ Simon ENC out (no tail) ++++++", $time);
               $display("%t %m simon_enc.enc_out=0x%x", $time,
@@ -453,8 +454,8 @@ module simon_128_128_encryptor #(
 endmodule
 
 module simon_128_128_decryptor #(
-   parameter int unsigned SIMON_ROUNDS = 68,
-   parameter int unsigned SIMON_ROUNDS_PER_CYCLE = 4
+   parameter bit [6:0] SIMON_ROUNDS = 7'd68,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
 ) (
    input  wire   clk, rst, enable,
    input  wire   [127:0] dec_in,
@@ -465,15 +466,16 @@ module simon_128_128_decryptor #(
    output logic  input_acknowledged,
    output wire   output_valid
 );
+  typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE):0] xy_idx_t;
 
-  wire [63:0] y_words[0:SIMON_ROUNDS_PER_CYCLE];
-  wire [63:0] x_words[0:SIMON_ROUNDS_PER_CYCLE];
+  wire [63:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [63:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
   wire [63:0] x_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
   wire [63:0] y_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
   logic [63:0] y_ff;
   logic [63:0] x_ff;
   logic busy;
-  wire [63:0] temp[0:SIMON_ROUNDS_PER_CYCLE];
+  wire [63:0] temp[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
   wire [63:0] temp_tail[0:SIMON_ROUNDS_PER_CYCLE];
 
   logic [6:0] roundCount;
@@ -541,7 +543,7 @@ module simon_128_128_decryptor #(
       assign y_words[i + 1] = x_words[i];
       // XOR with round key  
       // TMA: assign x_words[i + 1] = temp[i] ^ key_expanded[`SIMON_ROUNDS - (roundCount + i) - 1];
-      assign x_words[i + 1] = temp[i] ^ key_expanded[(SIMON_ROUNDS - i - 1) - uint32_t'(roundCount)];
+      assign x_words[i + 1] = temp[i] ^ key_expanded[(SIMON_ROUNDS - i - 1) - roundCount];
        
 `ifdef notdef
       always_comb begin
@@ -587,16 +589,16 @@ module simon_128_128_decryptor #(
           end
         end
         else begin
-          if ((!(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
+          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
             // In body, still have work to do -- perform an intermediate latch now
             busy <= busy;
             input_acknowledged = input_acknowledged;
             roundCount <= roundCount + SIMON_ROUNDS_PER_CYCLE;
-            y_ff <= y_words[SIMON_ROUNDS_PER_CYCLE];
-            x_ff <= x_words[SIMON_ROUNDS_PER_CYCLE];
+            y_ff <= y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
+            x_ff <= x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
           end
           else begin
-            if (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) begin
+            if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) begin
               // Finishing up the tail; latch from tail and set output to valid
               busy <= busy;
               input_acknowledged = input_acknowledged;
@@ -604,7 +606,7 @@ module simon_128_128_decryptor #(
               roundCount <= roundCount + (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE);
               y_ff <= y_ff; // Don't care
               x_ff <= x_ff; // Don't care
-              dec_out <= {y_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], x_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
+              dec_out <= {y_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], x_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
               //done <= 1;
 `ifdef SIMON_DEBUG
               $display("%t ++++++ Simon DEC out (tail) ++++++", $time);
@@ -622,7 +624,7 @@ module simon_128_128_decryptor #(
               roundCount <= roundCount + SIMON_ROUNDS_PER_CYCLE; 
               y_ff <= y_ff; // Don't care
               x_ff <= x_ff; // Don't care
-              dec_out <= {y_words[SIMON_ROUNDS_PER_CYCLE], x_words[SIMON_ROUNDS_PER_CYCLE]};
+              dec_out <= {y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)], x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)]};
               //done <= 2;
 `ifdef SIMON_DEBUG
               $display("%t ++++++ Simon DEC out (no tail) ++++++", $time);

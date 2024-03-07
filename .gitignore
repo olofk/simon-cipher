@@ -3,3 +3,5 @@ FOO
 *.d
 *.swp
 *.log
+simon-test
+obj_dir

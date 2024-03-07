@@ -131,32 +131,10 @@ module simon_128_128_keyexpand #(
   const logic [65:0] z = 66'b010111_0011011010_0111111000_1000010100_0110010010_1100000011_1011110101;
   assign output_valid = local_output_valid;
 
-  // always_comb begin
-    assign tmp0 = key_words[current_iter_minus1];
-    assign tmp1 = {tmp0[2:0], tmp0[63:3]};
-    assign tmp2 =  tmp1 ^ {tmp1[0], tmp1[63:1]};
-    assign next_iter = current_iter + 1;
-  // end
-
-  always_comb begin
-    //$strobe("%t %m current_iter=%d", $time, current_iter);
-    //$strobe("%t %m next_iter=%d", $time, next_iter);
-    /*
-    $strobe("%t %m local_output_valid=%d", $time, local_output_valid);
-    $strobe("%t %m key_out_valid=%d", $time, output_valid);
-    
-    $strobe("%t %m key_out[0]=%h", $time, key_expanded[0]);
-    $strobe("%t %m key_out[1]=%h", $time, key_expanded[1]);
-    $strobe("%t %m key_out[2]=%h", $time, key_expanded[2]);
-    $strobe("%t %m key_out[66]=%h", $time, key_expanded[66]);
-    $strobe("%t %m key_out[67]=%h", $time, key_expanded[67]);
-    //$strobe("%t %m key_words[0]=%h", $time, key_words[0]);
-    
-    $strobe("%t %m busy=%d", $time, busy);
-    $strobe("%t %m enable=%d", $time, enable);
-    $strobe("%t %m key_in[0]=%h", $time, key_in[0]);
-    */
-  end
+  assign tmp0 = key_words[current_iter_minus1];
+  assign tmp1 = {tmp0[2:0], tmp0[63:3]};
+  assign tmp2 =  tmp1 ^ {tmp1[0], tmp1[63:1]};
+  assign next_iter = current_iter + 1;
 
   always_ff @(posedge clk) begin
 `ifdef notdef
@@ -175,18 +153,7 @@ module simon_128_128_keyexpand #(
       current_iter <= 2;
       current_iter_minus1 <= 1;
       current_iter_minus2 <= 0;
-      key_words <= /* '{default:'0}; */ {64'ha6d2ae2816157e2b, 64'h3c4fcf098815f7ab, 64'h8d6054c640696059, 64'h6aca3f22dbe1b259, 64'hc96a4f2fc954b2ca, 64'h608e2dca21a190d0,
-            64'h3c8c97b5d0856620, 64'h9b2889b83946958b, 64'h9a4f1e6abc62234, 64'ha579a765797dcc13, 64'hb8a3a083ac81b88b, 64'h96181682c9da1f77,
-            64'hccfedcc426d8a56f, 64'h6cb7df29f0937e71, 64'h85ca52c783c02ba, 64'h72c67e2147e8c1f1, 64'hced7f2f5bb406967, 64'h80e00af54cb35b7,
-            64'ha0a92d155b6a4376, 64'h49ee482355ef2612, 64'h32f5ff6cfb76aa28, 64'h336057c7fac96608, 64'h48500f17847cef75, 64'h3110a92b8dfecaec,
-            64'hf29cef5fb2e3257a, 64'h3f9505ca7f7363e8, 64'h8968e045a50580c4, 64'h19d168396e7c7400, 64'h7430243ee1d236f8, 64'h6feb9102a3a4ee4d,
-            64'hf0cc10f160631a28, 64'h1012dec66514356, 64'haf03d86dd533d98b, 64'h31ee9498fe5bfa03, 64'h5df1c48bae2e696, 64'h6ef7792a9d567744,
-            64'h31117b00bf62b0f7, 64'h43bbe057eb3f5a9, 64'h7e2a48dfb8a00ee4, 64'h33e3ac6c8dd20b67, 64'h1497f86b1e3890c2, 64'hafc7d318a0096f8e,
-            64'hd46c80c67fc6d437, 64'hd7f374f3f7f227b7, 64'hac1226e8c1b84d46, 64'h974fedbf9c215536, 64'he870da7b34018d4e, 64'h5b3904a8b61e83b6,
-            64'hb95b955b565c4afe, 64'h987830a9964f31bb, 64'h8c2cefbb020ea02f, 64'h6ec09c5ab9d1f040, 64'h78e70a0a01567edf, 64'h89adf244a611a78b,
-            64'h4eb79499200aafaa, 64'h9b6f8661efefa779, 64'h1b9363ccfcf65ecf, 64'h765b23db4041f6b0, 64'hedc24a75df05808f, 64'h8ac0b1cd59aee154,
-            64'hcbc9a8af5e554d4c, 64'h20fae1adb87ee3d5, 64'hc226a57fcd2280f6, 64'h6b63a0aa42f76439, 64'h8603149fdeace5cf, 64'h9c3c0c8fbb37c920,
-            64'h63b8aa392d869f84, 64'ha98f6c94f3a08cd4}; 
+      key_words <= '{default:'0};
       key_expanded <= '{default:'0};
     end
     else begin

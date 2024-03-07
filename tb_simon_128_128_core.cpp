@@ -2,7 +2,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <verilated.h>
-#include <verilated_vcd_c.h>
 #include "Vsimon_128_128_core.h"
 #include "Vsimon_128_128_core___024unit.h"
 #include "simon.h"
@@ -74,9 +73,12 @@ check_out_valid(Vsimon_128_128_core *dut, vluint64_t &sim_time)
 int
 main(int argc, char** argv, char** env)
 {
-  srand (time(NULL));
+  time_t seed = time(NULL);
+  srand (seed);
+  fprintf(stderr, "INFO: Start RNG seed = %lu.\n", seed);
+
   Verilated::commandArgs(argc, argv);
-  Vsimon_128_128_core *dut = new Vsimon_128_128_core;
+  static Vsimon_128_128_core *dut = new Vsimon_128_128_core;
 
   // run some fixed tests
   while (sim_time < MAX_SIM_TIME)
@@ -107,7 +109,9 @@ main(int argc, char** argv, char** env)
       case 160:
         fprintf(stderr, "INFO: Requesting encryption @ cycle %lu...\n", sim_time);
         dut->op_i = Vsimon_128_128_core___024unit::simon_op_e::SIMON_ENCRYPT;
-        *(uint128_t *)dut->data_i.data() = simon_128_128_plaintext;
+        // FIXME: *(uint128_t *)dut->data_i.data() = simon_128_128_plaintext;
+        for (unsigned i=0; i < 4; i++)
+          dut->data_i.m_storage[i] = ((uint32_t *)&simon_128_128_plaintext)[i];
         dut->data_valid_i = TRUE;
         break;
 
@@ -118,7 +122,9 @@ main(int argc, char** argv, char** env)
       case 180:
         fprintf(stderr, "INFO: Requesting decryption @ cycle %lu...\n", sim_time);
         dut->op_i = Vsimon_128_128_core___024unit::simon_op_e::SIMON_DECRYPT;
-        *(uint128_t *)dut->data_i.data() = simon_128_128_ciphertext;
+        // FIXME: *(uint128_t *)dut->data_i.data() = simon_128_128_ciphertext;
+        for (unsigned i=0; i < 4; i++)
+          dut->data_i.m_storage[i] = ((uint32_t *)&simon_128_128_ciphertext)[i];
         dut->data_valid_i = TRUE;
         break;
 
@@ -129,6 +135,7 @@ main(int argc, char** argv, char** env)
       }
     }
 
+#ifdef notdef
     fprintf(stderr, "INFO: DUT state @ cycle %lu:\n", sim_time);
     fprintf(stderr, "  clk = %u\n", dut->clk);
     fprintf(stderr, "  rst = %u\n", dut->rst);
@@ -137,6 +144,7 @@ main(int argc, char** argv, char** env)
     fprintf(stderr, "  data_valid_i = %u\n", dut->data_valid_i);
     fprintf(stderr, "  data_valid_o = %u\n", dut->data_valid_o);
     fprintf(stderr, "  ready_o = %u\n", dut->ready_o);
+#endif /* notdef */
 
     sim_time++;
   }
@@ -151,7 +159,7 @@ main(int argc, char** argv, char** env)
 
   while (trial_cnt < MAX_TRIALS)
   {
-    unsigned trialval = rand() % 1000000;
+    unsigned trialval = rand() % 10000000;
 
     // only initial computation on the posedge
     if (dut->clk == 0)
@@ -309,7 +317,7 @@ main(int argc, char** argv, char** env)
     }
 
     trial_cnt++;
-    if ((trial_cnt % 100000) == 0)
+    if ((trial_cnt % 1000000) == 0)
       fprintf(stderr, "INFO: Successfully completed %lu trials... (keyexpands:%lu, encrypts:%lu, decrypts:%lu)\n",
               trial_cnt, n_keyexpand, n_encrypt, n_decrypt);
   }

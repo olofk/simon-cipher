@@ -12,7 +12,7 @@ typedef enum logic [1:0] {
 
 module simon_128_128_core #(
    parameter bit [6:0] SIMON_ROUNDS = 7'd68,
-   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd12
 ) (
     input  wire         clk, rst,
     // input ports
@@ -33,7 +33,10 @@ module simon_128_128_core #(
   logic [127:0] enc_data_o;
   logic [127:0] dec_data_o;
 
-  simon_128_128_keyexpand #() keyexpand_inst (
+  simon_128_128_keyexpand #(
+  .SIMON_ROUNDS           (SIMON_ROUNDS),
+  .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
+) keyexpand_inst (
    .clk               (clk),
    .rst               (rst),
    .enable            (key_valid_i),
@@ -45,7 +48,10 @@ module simon_128_128_core #(
    .ready_o           (keyexpand_ready_o)
   );
 
-  simon_128_128_encryptor #() encryptor_inst (
+  simon_128_128_encryptor #(
+  .SIMON_ROUNDS           (SIMON_ROUNDS),
+  .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
+) encryptor_inst (
    .clk               (clk),
    .rst               (rst),
    .enable            (data_valid_i),
@@ -58,7 +64,10 @@ module simon_128_128_core #(
    .ready_o           (encrypt_ready_o)
   );
 
-  simon_128_128_decryptor #() decryptor_inst (
+  simon_128_128_decryptor #(
+  .SIMON_ROUNDS           (SIMON_ROUNDS),
+  .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
+) decryptor_inst (
    .clk               (clk),
    .rst               (rst),
    .enable            (data_valid_i),
@@ -252,7 +261,7 @@ module simon_128_128_encryptor #(
    output logic         input_acknowledged,
    output logic         output_valid
 );
-  typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE):0] xy_idx_t;
+  typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE+1)-1:0] xy_idx_t;
 
   wire [63:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
   wire [63:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
@@ -376,7 +385,8 @@ module simon_128_128_encryptor #(
           end
         end
         else begin
-          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
+          /* verilator lint_off UNSIGNED */
+          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin /* verilator lint_on UNSIGNED */
               
             // In body, still have work to do -- perform an intermediate latch now
             busy <= busy;
@@ -466,7 +476,7 @@ module simon_128_128_decryptor #(
    output logic  input_acknowledged,
    output wire   output_valid
 );
-  typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE):0] xy_idx_t;
+  typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE+1)-1:0] xy_idx_t;
 
   wire [63:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
   wire [63:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
@@ -589,7 +599,8 @@ module simon_128_128_decryptor #(
           end
         end
         else begin
-          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
+          /* verilator lint_off UNSIGNED */
+          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin /* verilator lint_on UNSIGNED */
             // In body, still have work to do -- perform an intermediate latch now
             busy <= busy;
             input_acknowledged = input_acknowledged;

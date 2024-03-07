@@ -157,6 +157,7 @@ main(int argc, char** argv, char** env)
   // trial stats
   uint64_t n_keyexpand = 0, n_encrypt = 0, n_decrypt = 0;
 
+  vluint64_t sim_snap = sim_time;
   while (trial_cnt < MAX_TRIALS)
   {
     unsigned trialval = rand() % 10000000;
@@ -318,13 +319,14 @@ main(int argc, char** argv, char** env)
 
     trial_cnt++;
     if ((trial_cnt % 1000000) == 0)
-      fprintf(stderr, "INFO: Successfully completed %lu trials... (keyexpands:%lu, encrypts:%lu, decrypts:%lu)\n",
-              trial_cnt, n_keyexpand, n_encrypt, n_decrypt);
+      fprintf(stderr, "INFO: Successfully completed %lu trials... (keyexpands:%lu, encrypts:%lu, decrypts:%lu) [%.2lf cycles/op]\n",
+              trial_cnt, n_keyexpand, n_encrypt, n_decrypt,
+              (double)((sim_time - sim_snap)/2) / (double)trial_cnt);
   }
  
-    fprintf(stderr, "INFO: Exiting simulation @ cycle %lu...\n", sim_time);
+  fprintf(stderr, "INFO: Exiting simulation @ cycle %lu...\n", sim_time);
 
-    delete dut;
-    exit(EXIT_SUCCESS);
+  delete dut;
+  exit(EXIT_SUCCESS);
 }
 

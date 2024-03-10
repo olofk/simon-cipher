@@ -10,6 +10,36 @@
 #define MAX_SIM_TIME 400
 #define VERIF_START_TIME 7
 
+// proceed to the next simulation posedge
+#define SIM_GOTO_POSEDGE(DUT, SIM_TIME) \
+  if ((DUT)->clk == 0) \
+  { \
+    (DUT)->clk ^= 1; \
+    (DUT)->eval(); \
+    (SIM_TIME)++; \
+  }
+
+// proceed simulation by N cycles
+#define SIM_GOTO_NEXTN(DUT, SIM_TIME, N) \
+  for (unsigned __i=0; __i < (N); __i++) \
+  { \
+    (DUT)->clk ^= 1; \
+    (DUT)->eval(); \
+    (SIM_TIME)++; \
+    (DUT)->clk ^= 1; \
+    (DUT)->eval(); \
+    (SIM_TIME)++; \
+  }
+
+// proceed simulation until PROP is true on a posedge
+#define SIM_GOTO_TRUE(DUT, SIM_TIME, PROP) \
+  if (!(PROP) || (DUT)->clk == 0) \
+    do { \
+      (DUT)->clk ^= 1; \
+      (DUT)->eval(); \
+      (SIM_TIME)++; \
+    } while (!(PROP) || ((DUT)->clk == 0));
+
 vluint64_t sim_time = 0;
 vluint64_t posedge_cnt = 0;
 
@@ -48,14 +78,14 @@ genrand128(void)
 void
 dut_reset (Vsimon_64_32_core *dut, vluint64_t &sim_time)
 {
+    fprintf(stderr, "INFO: Reseting DUT @ cycle %lu...\n", sim_time/2);
+
+    // reset for 3 cycles
+    dut->rst = TRUE;
+    SIM_GOTO_NEXTN(dut, sim_time, 3);
+
+    // done resetting */
     dut->rst = FALSE;
-    if(sim_time >= 3 && sim_time < 6){
-        fprintf(stderr, "INFO: Reseting DUT @ cycle %lu...\n", sim_time/2);
-        dut->rst = TRUE;
-        dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_IDLE;
-        dut->key_valid_i = FALSE;
-        dut->data_valid_i = FALSE;
-    }
 }
 
 void
@@ -87,70 +117,106 @@ main(int argc, char** argv, char** env)
   Verilated::commandArgs(argc, argv);
   static Vsimon_64_32_core *dut = new Vsimon_64_32_core;
 
+  // cipher core is in SIMON_IDLE state
+  dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_IDLE;
+  dut->key_valid_i = FALSE;
+  dut->data_valid_i = FALSE;
+
+  // reset the DUT
+  dut_reset(dut, sim_time);
+  SIM_GOTO_POSEDGE(dut, sim_time);
+
   // run some fixed tests
-  while (sim_time < MAX_SIM_TIME)
   {
-    dut_reset(dut, sim_time);
+    uint32_t plaintext32, ciphertext32;
 
-    dut->clk ^= 1;
-    dut->eval();
+    // perform key expansion
+    fprintf(stderr, "INFO: Requesting key expansion @ cycle %lu...\n", sim_time/2);
+    dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_KEYEXPAND;
+    *(uint64_t *)dut->key_i = simon_64_32_key;
+    dut->key_valid_i = TRUE;
 
-    check_out_valid(dut, sim_time);
+    // execute one cycle
+    SIM_GOTO_NEXTN(dut, sim_time, 1);
 
-    if (dut->clk == 1)
+    // reset request
+    dut->key_valid_i = FALSE;
+
+    // wait for the cipher core to be READY_O again
+    SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+
+    // perform an encryption
+    fprintf(stderr, "INFO: Requesting encryption @ cycle %lu...\n", sim_time/2);
+    dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_ENCRYPT;
+    dut->data_i = simon_64_32_plaintext;
+    dut->data_valid_i = TRUE;
+  
+    // execute one cycle
+    SIM_GOTO_NEXTN(dut, sim_time, 1);
+
+    // reset request
+    dut->data_valid_i = FALSE;
+
+    // wait for the cipher core to indicate DATA_VALID_O
+    SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
+
+    // check the result against the published results
+    ciphertext32 = dut->data_o;
+    if (ciphertext32 != simon_64_32_ciphertext)
     {
-      posedge_cnt++;
-      switch (posedge_cnt)
-      {
-      case 10:
-        fprintf(stderr, "INFO: Requesting key expansion @ cycle %lu...\n", sim_time/2);
-        dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_KEYEXPAND;
-        *(uint64_t *)dut->key_i = simon_64_32_key;
-        dut->key_valid_i = TRUE;
-        break;
-
-      case 12:
-        dut->key_valid_i = FALSE;
-        break;
-
-      case 160:
-        fprintf(stderr, "INFO: Requesting encryption @ cycle %lu...\n", sim_time/2);
-        dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_ENCRYPT;
-        dut->data_i = simon_64_32_plaintext;
-        dut->data_valid_i = TRUE;
-        break;
-
-      case 162:
-        dut->data_valid_i = FALSE;
-        break;
-
-      case 180:
-        fprintf(stderr, "INFO: Requesting decryption @ cycle %lu...\n", sim_time/2);
-        dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_DECRYPT;
-        dut->data_i = simon_64_32_ciphertext;
-        dut->data_valid_i = TRUE;
-        break;
-
-      case 182:
-        dut->data_valid_i = FALSE;
-        break;
-
-      }
+      fprintf(stderr, "ERROR: encryption FAILED: H/W: 0x%08x, published: 0x%08x\n",
+              ciphertext32, simon_64_32_ciphertext);
+      exit(1);
     }
+    else
+      fprintf(stderr, "INFO: encryption PASSED: H/W: 0x%08x, published: 0x%08x\n",
+              ciphertext32, simon_64_32_ciphertext);
+  
+    // wait for the cipher core to be READY_O again
+    SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
-#ifdef notdef
-    fprintf(stderr, "INFO: DUT state @ cycle %lu:\n", sim_time/2);
-    fprintf(stderr, "  clk = %u\n", dut->clk);
-    fprintf(stderr, "  rst = %u\n", dut->rst);
-    fprintf(stderr, "  op_i = %u\n", dut->op_i);
-    fprintf(stderr, "  key_valid_i = %u\n", dut->key_valid_i);
-    fprintf(stderr, "  data_valid_i = %u\n", dut->data_valid_i);
-    fprintf(stderr, "  data_valid_o = %u\n", dut->data_valid_o);
-    fprintf(stderr, "  ready_o = %u\n", dut->ready_o);
-#endif /* notdef */
+    // perform a decryption
+    fprintf(stderr, "INFO: Requesting decryption @ cycle %lu...\n", sim_time/2);
+    dut->op_i = Vsimon_64_32_core___024unit::simon_op_e::SIMON_DECRYPT;
+    dut->data_i = simon_64_32_ciphertext;
+    dut->data_valid_i = TRUE;
+  
+    // execute one cycle
+    SIM_GOTO_NEXTN(dut, sim_time, 1);
 
-    sim_time++;
+    // reset request
+    dut->data_valid_i = FALSE;
+
+    // wait for the cipher core to indicate DATA_VALID_O
+    SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
+
+    // check the result against the published results
+    plaintext32 = dut->data_o;
+    if (plaintext32 != simon_64_32_plaintext)
+    {
+      fprintf(stderr, "ERROR: decryption FAILED: H/W: 0x%08x, published: 0x%08x\n",
+              plaintext32, simon_64_32_plaintext);
+      exit(1);
+    }
+    else
+      fprintf(stderr, "INFO: decryption PASSED: H/W: 0x%08x, published: 0x%08x\n",
+              plaintext32, simon_64_32_plaintext);
+  
+    // wait for the cipher core to be READY_O again
+    SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+
   }
+  
+#ifdef notdef
+  fprintf(stderr, "INFO: DUT state @ cycle %lu:\n", sim_time/2);
+  fprintf(stderr, "  clk = %u\n", dut->clk);
+  fprintf(stderr, "  rst = %u\n", dut->rst);
+  fprintf(stderr, "  op_i = %u\n", dut->op_i);
+  fprintf(stderr, "  key_valid_i = %u\n", dut->key_valid_i);
+  fprintf(stderr, "  data_valid_i = %u\n", dut->data_valid_i);
+  fprintf(stderr, "  data_valid_o = %u\n", dut->data_valid_o);
+  fprintf(stderr, "  ready_o = %u\n", dut->ready_o);
+#endif /* notdef */
 
   // now fuzz the interfaces
   simon_state_t state;
@@ -166,12 +232,7 @@ main(int argc, char** argv, char** env)
     unsigned trialval = rand() % 10000000;
 
     // only initial computation on the posedge
-    if (dut->clk == 0)
-    {
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
-    }
+    SIM_GOTO_POSEDGE(dut, sim_time);
 
     // need to enter a trial in the READY_O state
     assert(dut->ready_o);
@@ -193,22 +254,13 @@ main(int argc, char** argv, char** env)
       dut->key_valid_i = TRUE;
 
       // execute one cycle
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
 
       // reset request
       dut->key_valid_i = FALSE;
 
       // wait for the cipher core to be READY_O again
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->ready_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
       // one more keyexpand
       n_keyexpand++;
@@ -232,22 +284,13 @@ main(int argc, char** argv, char** env)
       dut->data_valid_i = TRUE;
 
       // execute one cycle
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
 
       // reset request
       dut->data_valid_i = FALSE;
 
       // wait for the cipher core to indicate DATA_VALID_O
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->data_valid_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
       // check the result against the S/W golden model
       hw_ciphertext32 = dut->data_o;
@@ -259,11 +302,7 @@ main(int argc, char** argv, char** env)
       }
 
       // wait for the cipher core to be READY_O again
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->ready_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
       // one more encrypt
       n_encrypt++;
@@ -287,22 +326,13 @@ main(int argc, char** argv, char** env)
       dut->data_valid_i = TRUE;
 
       // execute one cycle
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
 
       // reset request
       dut->data_valid_i = FALSE;
 
       // wait for the cipher core to indicate DATA_VALID_O
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->data_valid_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
       // check the result against the S/W golden model
       hw_plaintext32 = dut->data_o;
@@ -314,11 +344,7 @@ main(int argc, char** argv, char** env)
       }
 
       // wait for the cipher core to be READY_O again
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->ready_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
       // one more decrypt
       n_decrypt++;
@@ -339,32 +365,19 @@ main(int argc, char** argv, char** env)
       dut->data_valid_i = TRUE;
 
       // execute one cycle
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
 
       // reset request
       dut->data_valid_i = FALSE;
 
       // wait for the cipher core to indicate DATA_VALID_O
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->data_valid_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
       // retrieve the result from the H/W cipher core
       ciphertext32 = dut->data_o;
 
       // wait for the cipher core to be READY_O again
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->ready_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
       // one more trial finished
       trial_cnt++;
@@ -375,22 +388,13 @@ main(int argc, char** argv, char** env)
       dut->data_valid_i = TRUE;
 
       // execute one cycle
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
-      dut->clk ^= 1;
-      dut->eval();
-      sim_time++;
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
 
       // reset request
       dut->data_valid_i = FALSE;
 
       // wait for the cipher core to indicate DATA_VALID_O
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->data_valid_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
       // check the result against the S/W golden model
       verif_plaintext32 = dut->data_o;
@@ -402,11 +406,7 @@ main(int argc, char** argv, char** env)
       }
 
       // wait for the cipher core to be READY_O again
-      do {
-        dut->clk ^= 1;
-        dut->eval();
-        sim_time++;
-      } while (!dut->ready_o);
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
       // one more trial finished
       trial_cnt++;

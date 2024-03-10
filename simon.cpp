@@ -6,6 +6,7 @@
  *  # The MIT License (MIT) - see LICENSE.md
 */
 
+#include <stdio.h>
 #include <stdint.h>
 #include <limits.h>
 #include <stdlib.h>
@@ -47,6 +48,12 @@ uint8_t Simon_Init(SimSpk_Cipher *cipher_object, enum cipher_config_t cipher_cfg
     uint16_t key_words =  key_sizes[cipher_cfg] / word_size;
     uint64_t sub_keys[4] = {};
     uint64_t mod_mask = ULLONG_MAX >> (64 - word_size);
+#ifdef notdef
+    fprintf(stderr, "INFO: cipher parameters: block_size(%u), key_size(%u), round_limit(%u), word_size(%u), word_bytes(%u)\n",
+            cipher_object->block_size, cipher_object->key_size, cipher_object->round_limit, word_size, word_bytes);
+    fprintf(stderr, "INFO: cipher parameters: key_words(%u), mod_mask(0x%016lx), z_val(0x%016lx)\n",
+            key_words, mod_mask, z_arrays[cipher_object->z_seq]);
+#endif /* notdef */
 
     // Setup
     for(int i = 0; i < key_words; i++) {
@@ -84,6 +91,15 @@ uint8_t Simon_Init(SimSpk_Cipher *cipher_object, enum cipher_config_t cipher_cfg
         memcpy(cipher_object->key_schedule + (word_bytes * (i + 1)), &sub_keys[0], word_bytes);
 
     }
+
+#ifdef notdef
+    fprintf(stderr, "INFO: key table contents:\n");
+    uint32_t *key_schedule = (uint32_t *)cipher_object->key_schedule;
+    for (int i=0; i < simon_rounds[cipher_cfg]-1; i++)
+    {
+      fprintf(stderr, "  key_schedule[%2u] = 0x%08x\n", i, key_schedule[i]); 
+    }
+#endif /* notdef */
 
     if (cipher_cfg == cfg_64_32){
         cipher_object->encryptPtr = &Simon_Encrypt_32;

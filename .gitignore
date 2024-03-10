@@ -5,5 +5,6 @@ FOO
 *.log
 simon-test
 obj_dir
+obj_simon_64_32
 obj_simon_128_64
 obj_simon_128_128

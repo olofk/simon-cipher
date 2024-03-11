@@ -88,25 +88,6 @@ dut_reset (Vsimon_64_32_core *dut, vluint64_t &sim_time)
     dut->rst = FALSE;
 }
 
-void
-check_out_valid(Vsimon_64_32_core *dut, vluint64_t &sim_time)
-{
-  static unsigned char in_valid = 0; //in valid from current cycle
-  static unsigned char in_valid_d = 0; //delayed in_valid
-  static unsigned char out_valid_exp = 0; //expected out_valid value
-
-  if (sim_time >= VERIF_START_TIME)
-  {
-    if (dut->data_valid_o)
-    {
-      fprintf(stderr, "INFO: Request completed @ cycle %lu...\n", sim_time/2);
-      fprintf(stderr, "  data_valid_o: %u\n", dut->data_valid_o);
-      uint64_t data_o = dut->data_o;
-      fprintf(stderr, "  data_o: 0x%016lx\n", data_o);
-    }
-  }
-}
-
 int
 main(int argc, char** argv, char** env)
 {

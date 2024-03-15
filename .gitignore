@@ -4,7 +4,6 @@ FOO
 *.swp
 *.log
 simon-test
-obj_dir
-obj_simon_64_32
-obj_simon_128_64
-obj_simon_128_128
+obj_simon_64_32_core
+obj_simon_128_64_core
+obj_simon_128_128_core

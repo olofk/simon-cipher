@@ -9,30 +9,34 @@ typedef enum logic [1:0] {
   SIMON_DECRYPT   = 2'b11
 } simon_op_e /*verilator public*/;
 
-module simon_64_32_core #(
-   parameter bit [6:0] SIMON_ROUNDS = 7'd32,
-   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd12
+module simon_core #(
+   parameter int unsigned SIMON_KEY_W,
+   parameter int unsigned SIMON_DATA_W,
+   parameter bit [6:0] SIMON_ROUNDS,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE
 ) (
     input  wire         clk, rst,
     // input ports
     input  simon_op_e   op_i,
     input  logic        key_valid_i,
-    input  wire [7:0]   key_i [0:7],
+    input  wire [7:0]   key_i [0:(SIMON_KEY_W/8)-1],
     input  logic        data_valid_i,
-    input  wire [31:0] data_i,
+    input  wire [SIMON_DATA_W-1:0] data_i,
 
     // output ports
     output logic        ready_o,
     output logic        data_valid_o,
-    output wire [31:0] data_o
+    output wire [SIMON_DATA_W-1:0] data_o
 );
-  logic [15:0] key_table[0:SIMON_ROUNDS - 1];
+  logic [(SIMON_DATA_W/2)-1:0] key_table[0:SIMON_ROUNDS - 1];
   logic keyexpand_valid_o, encrypt_valid_o, decrypt_valid_o;
   logic keyexpand_ready_o, encrypt_ready_o, decrypt_ready_o;
-  logic [31:0] enc_data_o;
-  logic [31:0] dec_data_o;
+  logic [SIMON_DATA_W-1:0] enc_data_o;
+  logic [SIMON_DATA_W-1:0] dec_data_o;
 
-  simon_64_32_keyexpand #(
+  simon_core_keyexpand #(
+  .SIMON_KEY_W            (SIMON_KEY_W),
+  .SIMON_DATA_W           (SIMON_DATA_W),
   .SIMON_ROUNDS           (SIMON_ROUNDS),
   .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
 ) keyexpand_inst (
@@ -47,7 +51,9 @@ module simon_64_32_core #(
    .ready_o           (keyexpand_ready_o)
   );
 
-  simon_64_32_encryptor #(
+  simon_core_encryptor #(
+  .SIMON_KEY_W            (SIMON_KEY_W),
+  .SIMON_DATA_W           (SIMON_DATA_W),
   .SIMON_ROUNDS           (SIMON_ROUNDS),
   .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
 ) encryptor_inst (
@@ -63,7 +69,9 @@ module simon_64_32_core #(
    .ready_o           (encrypt_ready_o)
   );
 
-  simon_64_32_decryptor #(
+  simon_core_decryptor #(
+  .SIMON_KEY_W            (SIMON_KEY_W),
+  .SIMON_DATA_W           (SIMON_DATA_W),
   .SIMON_ROUNDS           (SIMON_ROUNDS),
   .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
 ) decryptor_inst (
@@ -93,15 +101,17 @@ module simon_64_32_core #(
 
 endmodule;
 
-module simon_64_32_keyexpand #(
-   parameter bit [6:0] SIMON_ROUNDS = 7'd32,
-   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
+module simon_core_keyexpand #(
+   parameter int unsigned SIMON_KEY_W,
+   parameter int unsigned SIMON_DATA_W,
+   parameter bit [6:0] SIMON_ROUNDS,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE
 ) (
    input  wire        clk, rst, enable,
-   input  wire [7:0]  key_in [0:7],
+   input  wire [7:0]  key_in [0:(SIMON_KEY_W/8)-1],
    input  wire        output_acknowledged,
    output logic       ready_o,
-   output logic [15:0] key_expanded[0:SIMON_ROUNDS - 1],
+   output logic [(SIMON_DATA_W/2)-1:0] key_expanded[0:SIMON_ROUNDS - 1],
    output logic       input_acknowledged,
    output logic       output_valid
 );
@@ -118,27 +128,46 @@ module simon_64_32_keyexpand #(
   */
 
   localparam int unsigned SIMON_ROUNDS_LOG2 = $clog2(SIMON_ROUNDS);
-  logic [15:0] tmp0;
-  logic [15:0] tmp1;
-  logic [15:0] tmp1a;
-  logic [15:0] tmp2;
+  localparam int unsigned SIMON_WORDS_PER_KEY = (SIMON_KEY_W/SIMON_DATA_W) * 2;
+
+  logic [(SIMON_DATA_W/2)-1:0] tmp0;
+  logic [(SIMON_DATA_W/2)-1:0] tmp1;
+  logic [(SIMON_DATA_W/2)-1:0] tmp1a;
+  logic [(SIMON_DATA_W/2)-1:0] tmp2;
   logic           busy;
   logic [SIMON_ROUNDS_LOG2-1:0]     current_iter, current_iter_minus1, current_iter_minus2, next_iter;
   logic           local_output_valid;
-  logic [15:0] key_words[0:SIMON_ROUNDS - 1];
+  logic [(SIMON_DATA_W/2)-1:0] key_words[0:SIMON_ROUNDS - 1];
 
   assign ready_o = !busy;
 
   // const logic [65:0] z = 66'b010111_0011011010_0111111000_1000010100_0110010010_1100000011_1011110101;
-  // const logic [65:0] z = 66'h7c2c_e512_07a6_35db;
-  const logic [65:0] z = 66'h19c3_522f_b386_a45f;
+  const logic [65:0] z = (SIMON_DATA_W == 64) ? 66'h7c2c_e512_07a6_35db
+                         : (SIMON_DATA_W == 32) ?  66'h19c3_522f_b386_a45f
+                         : 66'h0;
   assign output_valid = local_output_valid;
 
   assign tmp0 = key_words[current_iter_minus1];
-  assign tmp1 = {tmp0[2:0], tmp0[15:3]};
+  assign tmp1 = {tmp0[2:0], tmp0[(SIMON_DATA_W/2)-1:3]};
   assign tmp1a = tmp1 ^ key_words[current_iter-3];
-  assign tmp2 =  tmp1a ^ {tmp1a[0], tmp1a[15:1]};
+  assign tmp2 =  tmp1a ^ {tmp1a[0], tmp1a[(SIMON_DATA_W/2)-1:1]};
   assign next_iter = current_iter + 1;
+  logic [(SIMON_DATA_W/2)-1:0] key_words_in0, key_words_in1, key_words_in2, key_words_in3;
+
+  generate
+    if (SIMON_DATA_W == 32) begin
+      assign key_words_in0 = {key_in[1], key_in[0]};
+      assign key_words_in1 = {key_in[3], key_in[2]};
+      assign key_words_in2 = {key_in[5], key_in[4]};
+      assign key_words_in3 = {key_in[7], key_in[6]};
+    end
+    else if (SIMON_DATA_W == 64) begin
+      assign key_words_in0 = {key_in[3], key_in[2], key_in[1], key_in[0]};
+      assign key_words_in1 = {key_in[7], key_in[6], key_in[5], key_in[4]};
+      assign key_words_in2 = {key_in[11], key_in[10], key_in[9], key_in[8]};
+      assign key_words_in3 = {key_in[15], key_in[14], key_in[13], key_in[12]};
+    end
+  endgenerate
 
   always_ff @(posedge clk) begin
 `ifdef notdef
@@ -154,9 +183,9 @@ module simon_64_32_keyexpand #(
       busy <= `false;
       input_acknowledged <= `false;
       local_output_valid <= `false;
-      current_iter <= 4;
-      current_iter_minus1 <= 3;
-      current_iter_minus2 <= 2;
+      current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
+      current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
+      current_iter_minus2 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-2;
       key_words <= '{default:'0};
       key_expanded <= '{default:'0};
     end
@@ -168,9 +197,9 @@ module simon_64_32_keyexpand #(
             busy <= `false;
             input_acknowledged <= `false;
             local_output_valid <= `false;
-            current_iter <= 4;
-            current_iter_minus1 <= 3;
-            current_iter_minus2 <= 2;
+            current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
+            current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
+            current_iter_minus2 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-2;
         end
         // Not done yet
         else begin 
@@ -184,7 +213,7 @@ module simon_64_32_keyexpand #(
           end
           // Not on last round yet
           else begin
-            key_words[current_iter] <= 16'hFFFC ^ key_words[current_iter-4] ^ tmp2 ^ {15'h0, z[current_iter-4]};
+            key_words[current_iter] <= (SIMON_DATA_W/2)'(64'h0 - 4) ^ key_words[current_iter-4] ^ tmp2 ^ {{((SIMON_DATA_W/2)-1){1'b0}}, z[current_iter-4]};
             current_iter <= next_iter;
             current_iter_minus1 <= next_iter - 1;
             current_iter_minus2 <= next_iter - 2;
@@ -195,29 +224,27 @@ module simon_64_32_keyexpand #(
       else begin
         // Can handle incoming request
         if (enable) begin
-          current_iter <= 4;
-          current_iter_minus1 <= 3;
-          current_iter_minus2 <= 2;
+          current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
+          current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
+          current_iter_minus2 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-2;
           busy <= `true;
           input_acknowledged <= `true;
           // Set first two elements of key table to original key
           // Compiler wouldn't let me do this a nicer way
           //key_words[0:1] <= {key_in[0:7], key_in[8:15]};
-          // key_words[0] <= {key_in[7], key_in[6], key_in[5], key_in[4], key_in[3], key_in[2], key_in[1], key_in[0]};
-          // key_words[1] <= {key_in[15], key_in[14], key_in[13], key_in[12], key_in[11], key_in[10], key_in[9], key_in[8]};
-          key_words[0] <= {key_in[1], key_in[0]};
-          key_words[1] <= {key_in[3], key_in[2]};
-          key_words[2] <= {key_in[5], key_in[4]};
-          key_words[3] <= {key_in[7], key_in[6]};
+          key_words[0] <= key_words_in0;
+          key_words[1] <= key_words_in1;
+          key_words[2] <= key_words_in2;
+          key_words[3] <= key_words_in3;
 `ifdef notdef
           foreach(key_in[q]) $display("%t %m key_in[%d]=0x%x", $time, q, key_in[q]);
 `endif /* notdef */
         end
         // Idle and no incoming request
         else begin
-          current_iter <= 4;
-          current_iter_minus1 <= 3;
-          current_iter_minus2 <= 2;
+          current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
+          current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
+          current_iter_minus2 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-2;
           busy <= `false;
           input_acknowledged <= `false;
         end
@@ -226,30 +253,32 @@ module simon_64_32_keyexpand #(
   end  
 endmodule
 
-module simon_64_32_encryptor #(
-   parameter bit [6:0] SIMON_ROUNDS = 7'd32,
-   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
+module simon_core_encryptor #(
+   parameter int unsigned SIMON_KEY_W,
+   parameter int unsigned SIMON_DATA_W,
+   parameter bit [6:0] SIMON_ROUNDS,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE
 ) (
    input  wire          clk, rst, enable,
-   input  wire  [31:0] enc_in,
+   input  wire  [SIMON_DATA_W-1:0] enc_in,
    input  wire          output_acknowledged,
-   input  logic [15:0] key_expanded[0:SIMON_ROUNDS - 1],
+   input  logic [(SIMON_DATA_W/2)-1:0] key_expanded[0:SIMON_ROUNDS - 1],
    output logic         ready_o,
-   output logic [31:0] enc_out,
+   output logic [SIMON_DATA_W-1:0] enc_out,
    output logic         input_acknowledged,
    output logic         output_valid
 );
   typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE+1)-1:0] xy_idx_t;
 
-  wire [15:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
-  wire [15:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
-  wire [15:0] x_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
-  wire [15:0] y_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
-  logic [15:0] y_ff;
-  logic [15:0] x_ff;
+  wire [(SIMON_DATA_W/2)-1:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] x_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
+  wire [(SIMON_DATA_W/2)-1:0] y_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
+  logic [(SIMON_DATA_W/2)-1:0] y_ff;
+  logic [(SIMON_DATA_W/2)-1:0] x_ff;
   logic busy;
-  wire [15:0] temp[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
-  wire [15:0] temp_tail[0:SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE];
+  wire [(SIMON_DATA_W/2)-1:0] temp[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] temp_tail[0:SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE];
 
   assign ready_o = !busy;
 
@@ -291,11 +320,11 @@ module simon_64_32_encryptor #(
       //                       >> (`WORD_SIZE - 8))))  ^ y_words[i] ^ ((x_words[i] << 2) 
       //                       | (x_words[i] >> (`WORD_SIZE - 2))));
 
-      assign temp[i] = (( {x_words[i][14:0], x_words[i][15]} /* ((x_words[i] << 1) | (x_words[i] >> (`WORD_SIZE - 1))) */
-                          & {x_words[i][7:0], x_words[i][15:8]} /* ((x_words[i] << 8) | (x_words[i] >> (`WORD_SIZE - 8))) */
+      assign temp[i] = (( {x_words[i][(SIMON_DATA_W/2)-2:0], x_words[i][(SIMON_DATA_W/2)-1]} /* ((x_words[i] << 1) | (x_words[i] >> (`WORD_SIZE - 1))) */
+                          & {x_words[i][(SIMON_DATA_W/2)-9:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-8]} /* ((x_words[i] << 8) | (x_words[i] >> (`WORD_SIZE - 8))) */
                         )
                         ^ y_words[i]
-                        ^ {x_words[i][13:0], x_words[i][15:14]} /* ((x_words[i] << 2) | (x_words[i] >> (`WORD_SIZE - 2))) */
+                        ^ {x_words[i][(SIMON_DATA_W/2)-3:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-2]} /* ((x_words[i] << 2) | (x_words[i] >> (`WORD_SIZE - 2))) */
                        );
       
       // Calculate the cycle count
@@ -415,8 +444,8 @@ module simon_64_32_encryptor #(
         if (enable) begin
           // We're available and a request is being made -- latch input
           busy <= 1;
-          x_ff <= enc_in[31:16];
-          y_ff <= enc_in[15:0];
+          x_ff <= enc_in[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
+          y_ff <= enc_in[(SIMON_DATA_W/2)-1:0];
           input_acknowledged = 1;
           roundCount <= 0;
 `ifdef SIMON_DEBUG
@@ -441,30 +470,32 @@ module simon_64_32_encryptor #(
   end
 endmodule
 
-module simon_64_32_decryptor #(
-   parameter bit [6:0] SIMON_ROUNDS = 7'd32,
-   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE = 7'd4
+module simon_core_decryptor #(
+   parameter int unsigned SIMON_KEY_W,
+   parameter int unsigned SIMON_DATA_W,
+   parameter bit [6:0] SIMON_ROUNDS,
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE
 ) (
    input  wire   clk, rst, enable,
-   input  wire   [31:0] dec_in,
+   input  wire   [SIMON_DATA_W-1:0] dec_in,
    input  wire   output_acknowledged,
-   input  logic [15:0] key_expanded[0:SIMON_ROUNDS - 1],
+   input  logic [(SIMON_DATA_W/2)-1:0] key_expanded[0:SIMON_ROUNDS - 1],
    output logic  ready_o,
-   output logic  [31:0] dec_out,
+   output logic  [SIMON_DATA_W-1:0] dec_out,
    output logic  input_acknowledged,
    output wire   output_valid
 );
   typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE+1)-1:0] xy_idx_t;
 
-  wire [15:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
-  wire [15:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
-  wire [15:0] x_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
-  wire [15:0] y_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
-  logic [15:0] y_ff;
-  logic [15:0] x_ff;
+  wire [(SIMON_DATA_W/2)-1:0] y_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] x_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
+  wire [(SIMON_DATA_W/2)-1:0] y_tail_words[0:(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)];
+  logic [(SIMON_DATA_W/2)-1:0] y_ff;
+  logic [(SIMON_DATA_W/2)-1:0] x_ff;
   logic busy;
-  wire [15:0] temp[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
-  wire [15:0] temp_tail[0:SIMON_ROUNDS_PER_CYCLE];
+  wire [(SIMON_DATA_W/2)-1:0] temp[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] temp_tail[0:SIMON_ROUNDS_PER_CYCLE];
 
   logic [6:0] roundCount;
   logic done;
@@ -518,11 +549,11 @@ module simon_64_32_decryptor #(
       //                       >> (`WORD_SIZE - 1))) & ((x_words[i] << 8) | (x_words[i]
       //                       >> (`WORD_SIZE - 8))))  ^ y_words[i] ^ ((x_words[i] << 2) 
       //                       | (x_words[i] >> (`WORD_SIZE - 2))));
-      assign temp[i] = (( {x_words[i][14:0], x_words[i][15]} /* ((x_words[i] << 1) | (x_words[i] >> (`WORD_SIZE - 1))) */
-                          & {x_words[i][7:0], x_words[i][15:8]} /* ((x_words[i] << 8) | (x_words[i] >> (`WORD_SIZE - 8))) */
+      assign temp[i] = (( {x_words[i][(SIMON_DATA_W/2)-2:0], x_words[i][(SIMON_DATA_W/2)-1]} /* ((x_words[i] << 1) | (x_words[i] >> (`WORD_SIZE - 1))) */
+                          & {x_words[i][(SIMON_DATA_W/2)-9:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-8]} /* ((x_words[i] << 8) | (x_words[i] >> (`WORD_SIZE - 8))) */
                         )
                         ^ y_words[i]
-                        ^ {x_words[i][13:0], x_words[i][15:14]} /* ((x_words[i] << 2) | (x_words[i] >> (`WORD_SIZE - 2))) */
+                        ^ {x_words[i][(SIMON_DATA_W/2)-3:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-2]} /* ((x_words[i] << 2) | (x_words[i] >> (`WORD_SIZE - 2))) */
                        );
       
       // Calculate the cycle count
@@ -629,8 +660,8 @@ module simon_64_32_decryptor #(
         if (enable) begin
           // We're available and a request is being made -- latch input
           busy <= 1;
-          y_ff <= dec_in[31:16];
-          x_ff <= dec_in[15:0];
+          y_ff <= dec_in[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
+          x_ff <= dec_in[(SIMON_DATA_W/2)-1:0];
           input_acknowledged = 1;
           roundCount <= 0;
 `ifdef SIMON_DEBUG

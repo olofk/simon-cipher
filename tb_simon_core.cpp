@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <iostream>
 #include <cstdlib>
+#include <getopt.h>
 #include <verilated.h>
 #include "Vsimon_core.h"
 #include "Vsimon_core___024unit.h"
@@ -14,10 +15,83 @@
 #error ERROR: SIMON_DATA_W is not defined!
 #endif
 
-#define TRIAL_MAX       1000000000UL
+#define MAX_TRIALS      1000000000UL
 #define TRIAL_INTERVAL  500000UL
-#define MAX_SIM_TIME 400
-#define VERIF_START_TIME 7
+#define MAX_BUF         64
+
+static uint64_t max_trials = MAX_TRIALS;
+
+#include <stdint.h>
+typedef unsigned __int128 uint128_t;
+#define HI64(X)        ((uint64_t)(((X) >> 64) & 0xffffffffffffffffULL))
+#define LO64(X)        ((uint64_t)(((X))       & 0xffffffffffffffffULL))
+#define GEN128(HI, LO) ((((uint128_t)(HI)) << 64) | ((uint128_t)(LO)))
+#define TRUE  1
+#define FALSE 0
+
+#if (SIMON_DATA_W == 32)
+/* cipher data types */
+typedef uint64_t simon_key_t;
+typedef uint32_t simon_data_t;
+
+/* gold-truth interfaces */
+#define SIMON_GT_KEYEXPAND     simon_64_32_keyexpand
+#define SIMON_GT_ENCRYPT       simon_64_32_encrypt
+#define SIMON_GT_DECRYPT       simon_64_32_decrypt
+
+// reference data, from the Simon paper
+uint64_t simon_key = 0x1918111009080100UL;
+uint32_t simon_plaintext = 0x65656877;
+uint32_t simon_ciphertext = 0xc69be9bb;
+
+char *simon_print_key(char *buf, size_t len, simon_key_t key) { snprintf(buf, len, "0x%016lx", key); return buf; }
+char *simon_print_data(char *buf, size_t len, simon_data_t data) { snprintf(buf, len, "0x%08x", data); return buf; }
+
+#elif (SIMON_DATA_W == 64)
+
+/* cipher data types */
+typedef uint128_t simon_key_t;
+typedef uint64_t simon_data_t;
+
+/* gold-truth interfaces */
+#define SIMON_GT_KEYEXPAND     simon_128_64_keyexpand
+#define SIMON_GT_ENCRYPT       simon_128_64_encrypt
+#define SIMON_GT_DECRYPT       simon_128_64_decrypt
+
+// reference data, from the Simon paper
+uint128_t simon_key = GEN128(0x1b1a191813121110, 0x0b0a090803020100);
+uint64_t simon_plaintext = 0x656b696c20646e75UL;
+uint64_t simon_ciphertext = 0x44c8fc20b9dfa07aUL;
+
+char *simon_print_key(char *buf, size_t len, simon_key_t key) { snprintf(buf, len, "0x%016lx:%016lx", HI64(key), LO64(key)); return buf; }
+char *simon_print_data(char *buf, size_t len, simon_data_t data) { snprintf(buf, len, "0x%016lx", data); return buf; }
+
+#elif (SIMON_DATA_W == 128)
+
+/* cipher data types */
+typedef uint128_t simon_key_t;
+typedef uint128_t simon_data_t;
+
+/* gold-truth interfaces */
+#define SIMON_GT_KEYEXPAND     simon_128_128_keyexpand
+#define SIMON_GT_ENCRYPT       simon_128_128_encrypt
+#define SIMON_GT_DECRYPT       simon_128_128_decrypt
+
+// reference data, from the Simon paper
+uint128_t simon_key = GEN128(0x0f0e0d0c0b0a0908, 0x0706050403020100);
+uint128_t simon_plaintext = GEN128(0x6373656420737265, 0x6c6c657661727420);
+uint128_t simon_ciphertext = GEN128(0x49681b1e1e54fe3f, 0x65aa832af84e0bbc);
+
+char *simon_print_key(char *buf, size_t len, simon_key_t key) { snprintf(buf, len, "0x%016lx:%016lx", HI64(key), LO64(key)); return buf; }
+char *simon_print_data(char *buf, size_t len, simon_data_t data) { snprintf(buf, len, "0x%016lx:%016lx", HI64(data), LO64(data)); return buf; }
+
+#else
+#error ERROR: Requested Simon configuration not supported!
+#endif
+
+//
+// Verilator simulation schedulinh helper functions
+//
 
 // proceed to the next simulation posedge
 #define SIM_GOTO_POSEDGE(DUT, SIM_TIME) \
@@ -51,68 +125,6 @@
 
 vluint64_t sim_time = 0;
 vluint64_t posedge_cnt = 0;
-
-#include <stdint.h>
-typedef unsigned __int128 uint128_t;
-#define HI64(X)        ((uint64_t)(((X) >> 64) & 0xffffffffffffffffULL))
-#define LO64(X)        ((uint64_t)(((X))       & 0xffffffffffffffffULL))
-#define GEN128(HI, LO) ((((uint128_t)(HI)) << 64) | ((uint128_t)(LO)))
-#define TRUE  1
-#define FALSE 0
-
-#if (SIMON_DATA_W == 32)
-/* cipher data types */
-typedef uint64_t simon_key_t;
-#define KEY_FMT "0x%016lx"
-typedef uint32_t simon_data_t;
-#define DATA_FMT "0x%08x"
-
-/* gold-truth interfaces */
-#define SIMON_GT_KEYEXPAND     simon_64_32_keyexpand
-#define SIMON_GT_ENCRYPT       simon_64_32_encrypt
-#define SIMON_GT_DECRYPT       simon_64_32_decrypt
-
-// reference data, from the Simon paper
-uint64_t simon_key = 0x1918111009080100UL;
-uint32_t simon_plaintext = 0x65656877;
-uint32_t simon_ciphertext = 0xc69be9bb;
-
-#elif (SIMON_DATA_W == 64)
-
-/* cipher data types */
-typedef uint128_t simon_key_t;
-#define KEY_FMT "0x%016lx:%016lx"
-typedef uint64_t simon_data_t;
-#define DATA_FMT "0x%016lx"
-
-/* gold-truth interfaces */
-#define SIMON_GT_KEYEXPAND     simon_128_64_keyexpand
-#define SIMON_GT_ENCRYPT       simon_128_64_encrypt
-#define SIMON_GT_DECRYPT       simon_128_64_decrypt
-
-// reference data, from the Simon paper
-uint128_t simon_key = GEN128(0x1b1a191813121110, 0x0b0a090803020100);
-uint64_t simon_plaintext = 0x656b696c20646e75UL;
-uint64_t simon_ciphertext = 0x44c8fc20b9dfa07aUL;
-
-#elif (SIMON_DATA_W == 128)
-
-/* cipher data types */
-typedef uint128_t simon_key_t;
-typedef uint128_t simon_data_t;
-
-/* gold-truth interfaces */
-#define SIMON_GT_KEYEXPAND     simon_128_128_keyexpand
-#define SIMON_GT_ENCRYPT       simon_128_128_encrypt
-#define SIMON_GT_DECRYPT       simon_128_128_decrypt
-
-// reference data, from the Simon paper
-uint128_t simon_key = GEN128(0x0f0e0d0c0b0a0908, 0x0706050403020100);
-uint128_t simon_plaintext = GEN128(0x6373656420737265, 0x6c6c657661727420);
-uint128_t simon_ciphertext = GEN128(0x49681b1e1e54fe3f, 0x65aa832af84e0bbc);
-#else
-#error ERROR: Requested Simon configuration not supported!
-#endif
 
 // trial stats
 uint64_t n_keyexpand = 0, n_encrypt = 0, n_decrypt = 0, n_end2end = 0;
@@ -153,7 +165,39 @@ dut_reset (Vsimon_core *dut, vluint64_t &sim_time)
 int
 main(int argc, char** argv, char** env)
 {
+  // parse options
+  const struct option longopts[] =
+  {
+    {"maxtrials",   required_argument, 0, 'm'},
+    {"help",        no_argument,       0, 'h'},
+    {0,0,0,0},
+  };
+
+  int index;
+  int iarg=0;
+
+  //turn off getopt error message
+  opterr=1; 
+
+  while(iarg != -1)
+  {
+    iarg = getopt_long(argc, argv, "svh", longopts, &index);
+
+    switch (iarg)
+    {
+      case 'h':
+        printf("You hit help...\n");
+        break;
+
+      case 'm':
+        max_trials = strtoull(optarg, NULL, 10);
+        printf("INFO: max trials set to `%lu'...\n", max_trials);
+        break;
+    }
+  }
+
   simon_state_t state;
+  char buf1[MAX_BUF], buf2[MAX_BUF];
 
   time_t seed = time(NULL);
   srand (seed);
@@ -198,7 +242,7 @@ main(int argc, char** argv, char** env)
     // perform an encryption
     fprintf(stderr, "INFO: Requesting encryption @ cycle %lu...\n", sim_time/2);
     dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_ENCRYPT;
-    dut->data_i = simon_plaintext;
+    *(simon_data_t *)&dut->data_i = simon_plaintext;
     dut->data_valid_i = TRUE;
   
     // execute one cycle
@@ -211,16 +255,18 @@ main(int argc, char** argv, char** env)
     SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
     // check the result against the published results
-    ciphertext = dut->data_o;
+    ciphertext = *(simon_data_t *)&dut->data_o;
     if (ciphertext != simon_ciphertext)
     {
-      fprintf(stderr, "ERROR: encryption FAILED: H/W: " DATA_FMT ", published: " DATA_FMT "\n",
-              ciphertext, simon_ciphertext);
+      fprintf(stderr, "ERROR: encryption FAILED: H/W: %s, published: %s\n",
+              simon_print_data(buf1, MAX_BUF, ciphertext),
+              simon_print_data(buf2, MAX_BUF, simon_ciphertext));
       exit(1);
     }
     else
-      fprintf(stderr, "INFO: encryption PASSED: H/W: " DATA_FMT ", published: " DATA_FMT "\n",
-              ciphertext, simon_ciphertext);
+      fprintf(stderr, "INFO: encryption PASSED: H/W: %s, published: %s\n",
+              simon_print_data(buf1, MAX_BUF, ciphertext),
+              simon_print_data(buf2, MAX_BUF, simon_ciphertext));
   
     // wait for the cipher core to be READY_O again
     SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
@@ -228,7 +274,7 @@ main(int argc, char** argv, char** env)
     // perform a decryption
     fprintf(stderr, "INFO: Requesting decryption @ cycle %lu...\n", sim_time/2);
     dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT;
-    dut->data_i = simon_ciphertext;
+    *(simon_data_t *)&dut->data_i = simon_ciphertext;
     dut->data_valid_i = TRUE;
   
     // execute one cycle
@@ -241,16 +287,18 @@ main(int argc, char** argv, char** env)
     SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
     // check the result against the published results
-    plaintext = dut->data_o;
+    plaintext = *(simon_data_t *)&dut->data_o;
     if (plaintext != simon_plaintext)
     {
-      fprintf(stderr, "ERROR: decryption FAILED: H/W: " DATA_FMT ", published: " DATA_FMT "\n",
-              plaintext, simon_plaintext);
+      fprintf(stderr, "ERROR: decryption FAILED: H/W: %s, published: %s\n",
+              simon_print_data(buf1, MAX_BUF, plaintext),
+              simon_print_data(buf2, MAX_BUF, simon_plaintext));
       exit(1);
     }
     else
-      fprintf(stderr, "INFO: decryption PASSED: H/W: " DATA_FMT ", published: " DATA_FMT "\n",
-              plaintext, simon_plaintext);
+      fprintf(stderr, "INFO: decryption PASSED: H/W: %s, published: %s\n",
+              simon_print_data(buf1, MAX_BUF, plaintext),
+              simon_print_data(buf2, MAX_BUF, simon_plaintext));
   
     // wait for the cipher core to be READY_O again
     SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
@@ -273,7 +321,7 @@ main(int argc, char** argv, char** env)
   uint64_t trial_cnt = 0, trial_since = 0;
 
   vluint64_t sim_snap = sim_time;
-  while (trial_cnt < TRIAL_MAX)
+  while (trial_cnt < max_trials)
   {
     unsigned trialval = rand() % 10000000;
 
@@ -293,6 +341,9 @@ main(int argc, char** argv, char** env)
 
       // re-key the S/W golden cipher
       SIMON_GT_KEYEXPAND(&state, current_key);
+
+      fprintf(stderr, "INFO: resetting key to `%s'.\n",
+              simon_print_key(buf1, MAX_BUF, current_key));
 
       // re-key the Simon H/W core
       dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_KEYEXPAND;
@@ -326,7 +377,7 @@ main(int argc, char** argv, char** env)
 
       // test the Simon core H/W
       dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_ENCRYPT;
-      dut->data_i = plaintext;
+      *(simon_data_t *)&dut->data_i = plaintext;
       dut->data_valid_i = TRUE;
 
       // execute one cycle
@@ -339,11 +390,12 @@ main(int argc, char** argv, char** env)
       SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
       // check the result against the S/W golden model
-      hw_ciphertext = dut->data_o;
+      hw_ciphertext = *(simon_data_t *)&dut->data_o;
       if (hw_ciphertext != ciphertext)
       {
-          fprintf(stderr, "ERROR: encryption mis-match: S/W: " DATA_FMT ", H/W: " DATA_FMT "\n",
-                  ciphertext, hw_ciphertext);
+          fprintf(stderr, "ERROR: encryption mis-match: S/W: %s, H/W: %s\n",
+                  simon_print_data(buf1, MAX_BUF, ciphertext),
+                  simon_print_data(buf2, MAX_BUF, hw_ciphertext));
           exit(1);
         }
 
@@ -368,7 +420,7 @@ main(int argc, char** argv, char** env)
 
         // test the Simon core H/W
         dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT;
-        dut->data_i = ciphertext;
+        *(simon_data_t *)&dut->data_i = ciphertext;
         dut->data_valid_i = TRUE;
 
         // execute one cycle
@@ -381,11 +433,12 @@ main(int argc, char** argv, char** env)
         SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
         // check the result against the S/W golden model
-        hw_plaintext = dut->data_o;
+        hw_plaintext = *(simon_data_t *)&dut->data_o;
         if (hw_plaintext != plaintext)
         {
-          fprintf(stderr, "ERROR: decryption mis-match: S/W: " DATA_FMT ", H/W: " DATA_FMT "\n",
-                  plaintext, hw_plaintext);
+          fprintf(stderr, "ERROR: decryption mis-match: S/W: %s, H/W: %s\n",
+                  simon_print_data(buf1, MAX_BUF, plaintext),
+                  simon_print_data(buf2, MAX_BUF, hw_plaintext));
           exit(1);
         }
 
@@ -407,7 +460,7 @@ main(int argc, char** argv, char** env)
 
         // encrypt with the Simon core H/W
         dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_ENCRYPT;
-        dut->data_i = plaintext;
+        *(simon_data_t *)&dut->data_i = plaintext;
         dut->data_valid_i = TRUE;
 
         // execute one cycle
@@ -420,7 +473,7 @@ main(int argc, char** argv, char** env)
         SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
         // retrieve the result from the H/W cipher core
-        ciphertext = dut->data_o;
+        ciphertext = *(simon_data_t *)&dut->data_o;
 
         // wait for the cipher core to be READY_O again
         SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
@@ -430,7 +483,7 @@ main(int argc, char** argv, char** env)
 
         // test the Simon core H/W
         dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT;
-        dut->data_i = ciphertext;
+        *(simon_data_t *)&dut->data_i = ciphertext;
         dut->data_valid_i = TRUE;
 
         // execute one cycle
@@ -443,11 +496,12 @@ main(int argc, char** argv, char** env)
         SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
 
         // check the result against the S/W golden model
-        verif_plaintext = dut->data_o;
+        verif_plaintext = *(simon_data_t *)&dut->data_o;
         if (verif_plaintext != plaintext)
         {
-          fprintf(stderr, "ERROR: decryption mis-match: orig: " DATA_FMT ", decrypted: " DATA_FMT "\n",
-                  plaintext, verif_plaintext);
+          fprintf(stderr, "ERROR: decryption mis-match: orig: %s, decrypted: %s\n",
+                  simon_print_data(buf1, MAX_BUF, plaintext),
+                  simon_print_data(buf2, MAX_BUF, verif_plaintext));
           exit(1);
         }
 

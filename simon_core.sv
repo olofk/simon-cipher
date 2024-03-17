@@ -141,18 +141,15 @@ module simon_core_keyexpand #(
 
   assign ready_o = !busy;
 
-  // const logic [65:0] z = 66'b010111_0011011010_0111111000_1000010100_0110010010_1100000011_1011110101;
-  const logic [65:0] z = (SIMON_DATA_W == 64) ? 66'h7c2c_e512_07a6_35db
-                         : (SIMON_DATA_W == 32) ?  66'h19c3_522f_b386_a45f
-                         : 66'h0;
   assign output_valid = local_output_valid;
 
   assign tmp0 = key_words[current_iter_minus1];
   assign tmp1 = {tmp0[2:0], tmp0[(SIMON_DATA_W/2)-1:3]};
-  assign tmp1a = tmp1 ^ key_words[current_iter-3];
+  assign tmp1a = tmp1 ^ ((SIMON_WORDS_PER_KEY == 4) ? key_words[current_iter-3] : 0);
   assign tmp2 =  tmp1a ^ {tmp1a[0], tmp1a[(SIMON_DATA_W/2)-1:1]};
   assign next_iter = current_iter + 1;
   logic [(SIMON_DATA_W/2)-1:0] key_words_in0, key_words_in1, key_words_in2, key_words_in3;
+  logic [65:0] z;
 
   generate
     if (SIMON_DATA_W == 32) begin
@@ -160,12 +157,24 @@ module simon_core_keyexpand #(
       assign key_words_in1 = {key_in[3], key_in[2]};
       assign key_words_in2 = {key_in[5], key_in[4]};
       assign key_words_in3 = {key_in[7], key_in[6]};
+      assign z = 66'h19c3_522f_b386_a45f;
     end
     else if (SIMON_DATA_W == 64) begin
       assign key_words_in0 = {key_in[3], key_in[2], key_in[1], key_in[0]};
       assign key_words_in1 = {key_in[7], key_in[6], key_in[5], key_in[4]};
       assign key_words_in2 = {key_in[11], key_in[10], key_in[9], key_in[8]};
       assign key_words_in3 = {key_in[15], key_in[14], key_in[13], key_in[12]};
+      assign z = 66'h7c2c_e512_07a6_35db;
+    end
+    else if (SIMON_DATA_W == 128) begin
+      assign key_words_in0 = {key_in[7], key_in[6], key_in[5], key_in[4], key_in[3], key_in[2], key_in[1], key_in[0]};
+      assign key_words_in1 = {key_in[15], key_in[14], key_in[13], key_in[12], key_in[11], key_in[10], key_in[9], key_in[8]};
+      assign key_words_in2 = 0;
+      assign key_words_in3 = 0;
+      assign z = 66'b010111_0011011010_0111111000_1000010100_0110010010_1100000011_1011110101;
+    end
+    else begin
+      $fatal("SIMON_* parameters are not set correctly.");
     end
   endgenerate
 
@@ -213,7 +222,10 @@ module simon_core_keyexpand #(
           end
           // Not on last round yet
           else begin
-            key_words[current_iter] <= (SIMON_DATA_W/2)'(64'h0 - 4) ^ key_words[current_iter-4] ^ tmp2 ^ {{((SIMON_DATA_W/2)-1){1'b0}}, z[current_iter-4]};
+            key_words[current_iter] <= (SIMON_DATA_W/2)'(64'h0 - 4)
+                                       ^ key_words[current_iter-((SIMON_DATA_W == 128) ? 2 : 4)]
+                                       ^ tmp2
+                                       ^ {{((SIMON_DATA_W/2)-1){1'b0}}, z[current_iter-((SIMON_DATA_W == 128) ? 2 : 4)]};
             current_iter <= next_iter;
             current_iter_minus1 <= next_iter - 1;
             current_iter_minus2 <= next_iter - 2;

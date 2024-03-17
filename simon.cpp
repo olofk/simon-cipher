@@ -97,7 +97,7 @@ uint8_t Simon_Init(SimSpk_Cipher *cipher_object, enum cipher_config_t cipher_cfg
     uint32_t *key_schedule = (uint32_t *)cipher_object->key_schedule;
     for (int i=0; i < simon_rounds[cipher_cfg]-1; i++)
     {
-      fprintf(stderr, "  key_schedule[%2u] = 0x%08x\n", i, key_schedule[i]); 
+      fprintf(stderr, "  key_schedule[%2u] = 0x%016lx\n", i, ((uint64_t *)key_schedule)[i]); 
     }
 #endif /* notdef */
 

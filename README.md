@@ -1,8 +1,8 @@
 # simon-cipher
 
-To build:
+To build everything and run tests:
 ```
-make clean build
+make clean build test
 ```
 
 To run a test:

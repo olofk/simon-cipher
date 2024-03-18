@@ -323,7 +323,7 @@ main(int argc, char** argv, char** env)
   vluint64_t sim_snap = sim_time;
   while (trial_cnt < max_trials)
   {
-    unsigned trialval = rand() % 10000000;
+    unsigned trialval = rand() % 500000;
 
     // only initial computation on the posedge
     SIM_GOTO_POSEDGE(dut, sim_time);

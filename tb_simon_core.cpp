@@ -127,7 +127,7 @@ vluint64_t sim_time = 0;
 vluint64_t posedge_cnt = 0;
 
 // trial stats
-uint64_t n_keyexpand = 0, n_encrypt = 0, n_decrypt = 0, n_end2end = 0;
+uint64_t n_keyexpand = 0, n_encrypt = 0, n_encrypt_cl = 0, n_decrypt = 0, n_decrypt_cl = 0, n_end2end = 0;
 
 // generate a random integer
 uint32_t
@@ -393,145 +393,217 @@ main(int argc, char** argv, char** env)
       hw_ciphertext = *(simon_data_t *)&dut->data_o;
       if (hw_ciphertext != ciphertext)
       {
-          fprintf(stderr, "ERROR: encryption mis-match: S/W: %s, H/W: %s\n",
-                  simon_print_data(buf1, MAX_BUF, ciphertext),
-                  simon_print_data(buf2, MAX_BUF, hw_ciphertext));
-          exit(1);
-        }
-
-        // wait for the cipher core to be READY_O again
-        SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
-
-        // one more encrypt
-        n_encrypt++;
-
-        // one more trial finished
-        trial_cnt++;
+        fprintf(stderr, "ERROR: encryption mis-match: S/W: %s, H/W: %s\n",
+                simon_print_data(buf1, MAX_BUF, ciphertext),
+                simon_print_data(buf2, MAX_BUF, hw_ciphertext));
+        exit(1);
       }
 
-      // decrypt trial if even
-      if ((trialval & 1) == 1)
+      // wait for the cipher core to be READY_O again
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+
+      // one more encrypt
+      n_encrypt++;
+
+      // one more trial finished
+      trial_cnt++;
+    }
+
+    // encrypt_cl trial
+    if ((trialval & 0xff) == 1)
+    {
+      simon_data_t plaintext, ciphertext, hw_ciphertext;
+      plaintext = (simon_data_t)genrand64();
+
+      // generate golden truth for this encrpytion trial
+      SIMON_GT_ENCRYPT(&state, plaintext, &ciphertext);
+
+      // test the Simon core H/W
+      dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_ENCRYPT_CL;
+      *(simon_data_t *)&dut->data_i = plaintext;
+
+      // execute one cycle
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
+
+      // check the result against the S/W golden model
+      hw_ciphertext = *(simon_data_t *)&dut->data_o;
+      if (hw_ciphertext != ciphertext)
       {
-        simon_data_t plaintext, ciphertext, hw_plaintext;
-        ciphertext = (simon_data_t)genrand64();
-
-        // generate golden truth for this encrpytion trial
-        SIMON_GT_DECRYPT(&state, ciphertext, &plaintext);
-
-        // test the Simon core H/W
-        dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT;
-        *(simon_data_t *)&dut->data_i = ciphertext;
-        dut->data_valid_i = TRUE;
-
-        // execute one cycle
-        SIM_GOTO_NEXTN(dut, sim_time, 1);
-
-        // reset request
-        dut->data_valid_i = FALSE;
-
-        // wait for the cipher core to indicate DATA_VALID_O
-        SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
-
-        // check the result against the S/W golden model
-        hw_plaintext = *(simon_data_t *)&dut->data_o;
-        if (hw_plaintext != plaintext)
-        {
-          fprintf(stderr, "ERROR: decryption mis-match: S/W: %s, H/W: %s\n",
-                  simon_print_data(buf1, MAX_BUF, plaintext),
-                  simon_print_data(buf2, MAX_BUF, hw_plaintext));
-          exit(1);
-        }
-
-        // wait for the cipher core to be READY_O again
-        SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
-
-        // one more decrypt
-        n_decrypt++;
-
-        // one more trial finished
-        trial_cnt++;
+        fprintf(stderr, "ERROR: encryption mis-match: S/W: %s, H/W: %s\n",
+                simon_print_data(buf1, MAX_BUF, ciphertext),
+                simon_print_data(buf2, MAX_BUF, hw_ciphertext));
+        exit(1);
       }
 
-      // encrypt-decrpyt-verify trial
-      if ((trialval & 0x3) == 3)
+      // wait for the cipher core to be READY_O again
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+
+      // one more encrypt
+      n_encrypt_cl++;
+
+      // one more trial finished
+      trial_cnt++;
+    }
+
+    // decrypt trial if even
+    if ((trialval & 1) == 1)
+    {
+      simon_data_t plaintext, ciphertext, hw_plaintext;
+      ciphertext = (simon_data_t)genrand64();
+
+      // generate golden truth for this encrpytion trial
+      SIMON_GT_DECRYPT(&state, ciphertext, &plaintext);
+
+      // test the Simon core H/W
+      dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT;
+      *(simon_data_t *)&dut->data_i = ciphertext;
+      dut->data_valid_i = TRUE;
+
+      // execute one cycle
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
+
+      // reset request
+      dut->data_valid_i = FALSE;
+
+      // wait for the cipher core to indicate DATA_VALID_O
+      SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
+
+      // check the result against the S/W golden model
+      hw_plaintext = *(simon_data_t *)&dut->data_o;
+      if (hw_plaintext != plaintext)
       {
-        simon_data_t plaintext, ciphertext, verif_plaintext;
-        plaintext = (simon_data_t)genrand64();
+        fprintf(stderr, "ERROR: decryption mis-match: S/W: %s, H/W: %s\n",
+                simon_print_data(buf1, MAX_BUF, plaintext),
+                simon_print_data(buf2, MAX_BUF, hw_plaintext));
+        exit(1);
+      }
 
-        // encrypt with the Simon core H/W
-        dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_ENCRYPT;
-        *(simon_data_t *)&dut->data_i = plaintext;
-        dut->data_valid_i = TRUE;
+      // wait for the cipher core to be READY_O again
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
-        // execute one cycle
-        SIM_GOTO_NEXTN(dut, sim_time, 1);
+      // one more decrypt
+      n_decrypt++;
 
-        // reset request
-        dut->data_valid_i = FALSE;
+      // one more trial finished
+      trial_cnt++;
+    }
 
-        // wait for the cipher core to indicate DATA_VALID_O
-        SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
+    // decrypt_cl trial
+    if ((trialval & 0xff) == 2)
+    {
+      simon_data_t plaintext, ciphertext, hw_plaintext;
+      ciphertext = (simon_data_t)genrand64();
 
-        // retrieve the result from the H/W cipher core
-        ciphertext = *(simon_data_t *)&dut->data_o;
+      // generate golden truth for this encrpytion trial
+      SIMON_GT_DECRYPT(&state, ciphertext, &plaintext);
 
-        // wait for the cipher core to be READY_O again
-        SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+      // test the Simon core H/W
+      dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT_CL;
+      *(simon_data_t *)&dut->data_i = ciphertext;
 
-        // one more trial finished
-        trial_cnt++;
+      // execute one cycle
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
 
-        // test the Simon core H/W
-        dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT;
-        *(simon_data_t *)&dut->data_i = ciphertext;
-        dut->data_valid_i = TRUE;
+      // check the result against the S/W golden model
+      hw_plaintext = *(simon_data_t *)&dut->data_o;
+      if (hw_plaintext != plaintext)
+      {
+        fprintf(stderr, "ERROR: decryption mis-match: S/W: %s, H/W: %s\n",
+                simon_print_data(buf1, MAX_BUF, plaintext),
+                simon_print_data(buf2, MAX_BUF, hw_plaintext));
+        exit(1);
+      }
 
-        // execute one cycle
-        SIM_GOTO_NEXTN(dut, sim_time, 1);
+      // wait for the cipher core to be READY_O again
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
 
-        // reset request
-        dut->data_valid_i = FALSE;
+      // one more decrypt
+      n_decrypt_cl++;
 
-        // wait for the cipher core to indicate DATA_VALID_O
-        SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
+      // one more trial finished
+      trial_cnt++;
+    }
 
-        // check the result against the S/W golden model
-        verif_plaintext = *(simon_data_t *)&dut->data_o;
-        if (verif_plaintext != plaintext)
-        {
-          fprintf(stderr, "ERROR: decryption mis-match: orig: %s, decrypted: %s\n",
-                  simon_print_data(buf1, MAX_BUF, plaintext),
-                  simon_print_data(buf2, MAX_BUF, verif_plaintext));
-          exit(1);
-        }
+    // encrypt-decrpyt-verify trial
+    if ((trialval & 0x3) == 3)
+    {
+      simon_data_t plaintext, ciphertext, verif_plaintext;
+      plaintext = (simon_data_t)genrand64();
 
-        // wait for the cipher core to be READY_O again
-        SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+      // encrypt with the Simon core H/W
+      dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_ENCRYPT;
+      *(simon_data_t *)&dut->data_i = plaintext;
+      dut->data_valid_i = TRUE;
 
-        // one more trial finished
-        trial_cnt++;
+      // execute one cycle
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
 
-        // one more decrypt
-        n_end2end++;
+      // reset request
+      dut->data_valid_i = FALSE;
+
+      // wait for the cipher core to indicate DATA_VALID_O
+      SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
+
+      // retrieve the result from the H/W cipher core
+      ciphertext = *(simon_data_t *)&dut->data_o;
+
+      // wait for the cipher core to be READY_O again
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+
+      // one more trial finished
+      trial_cnt++;
+
+      // test the Simon core H/W
+      dut->op_i = Vsimon_core___024unit::simon_op_e::SIMON_DECRYPT;
+      *(simon_data_t *)&dut->data_i = ciphertext;
+      dut->data_valid_i = TRUE;
+
+      // execute one cycle
+      SIM_GOTO_NEXTN(dut, sim_time, 1);
+
+      // reset request
+      dut->data_valid_i = FALSE;
+
+      // wait for the cipher core to indicate DATA_VALID_O
+      SIM_GOTO_TRUE(dut, sim_time, dut->data_valid_o);
+
+      // check the result against the S/W golden model
+      verif_plaintext = *(simon_data_t *)&dut->data_o;
+      if (verif_plaintext != plaintext)
+      {
+        fprintf(stderr, "ERROR: decryption mis-match: orig: %s, decrypted: %s\n",
+                simon_print_data(buf1, MAX_BUF, plaintext),
+                simon_print_data(buf2, MAX_BUF, verif_plaintext));
+        exit(1);
+      }
+
+      // wait for the cipher core to be READY_O again
+      SIM_GOTO_TRUE(dut, sim_time, dut->ready_o);
+
+      // one more trial finished
+      trial_cnt++;
+
+      // one more decrypt
+      n_end2end++;
 
   #ifdef notdef
-        fprintf(stderr, "INFO: end2end: plaintext32(0x%08x), ciphertext32(0x%08x), verif_plaintext32(0x%08x)\n",
-                plaintext, ciphertext, verif_plaintext);
+      fprintf(stderr, "INFO: end2end: plaintext32(0x%08x), ciphertext32(0x%08x), verif_plaintext32(0x%08x)\n",
+              plaintext, ciphertext, verif_plaintext);
   #endif /* notdef */
-      }
-
-      if ((trial_cnt - trial_since) > TRIAL_INTERVAL)
-      {
-        fprintf(stderr, "INFO: Successfully completed %lu trials... (keyexpands:%lu, encrypts:%lu, decrypts:%lu, end2end:%lu) [%.2lf cycles/op]\n",
-                trial_since+TRIAL_INTERVAL, n_keyexpand, n_encrypt, n_decrypt, n_end2end,
-                (double)((sim_time - sim_snap)/2) / (double)trial_cnt);
-        trial_since = trial_since + TRIAL_INTERVAL;
-      }
     }
-   
-    fprintf(stderr, "INFO: Exiting simulation @ cycle %lu...\n", sim_time/2);
 
-    delete dut;
-    exit(EXIT_SUCCESS);
+    if ((trial_cnt - trial_since) > TRIAL_INTERVAL)
+    {
+      fprintf(stderr, "INFO: Successfully completed %lu trials... (keyexp:%lu, enc:%lu, enc_cl: %lu, dec:%lu, dec_cl: %lu, end2end:%lu) [%.2lf cycles/op]\n",
+              trial_since+TRIAL_INTERVAL, n_keyexpand, n_encrypt, n_encrypt_cl, n_decrypt, n_decrypt_cl, n_end2end,
+              (double)((sim_time - sim_snap)/2) / (double)trial_cnt);
+      trial_since = trial_since + TRIAL_INTERVAL;
+    }
   }
+   
+  fprintf(stderr, "INFO: Exiting simulation @ cycle %lu...\n", sim_time/2);
+
+  delete dut;
+  exit(EXIT_SUCCESS);
+}
 

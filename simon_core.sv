@@ -2,11 +2,13 @@
 `define true  1'b1
 `define false 1'b0
 
-typedef enum logic [1:0] {
-  SIMON_IDLE      = 2'b00,
-  SIMON_KEYEXPAND = 2'b01,
-  SIMON_ENCRYPT   = 2'b10,
-  SIMON_DECRYPT   = 2'b11
+typedef enum logic [2:0] {
+  SIMON_IDLE       = 3'b000,
+  SIMON_KEYEXPAND  = 3'b001,
+  SIMON_ENCRYPT    = 3'b010,
+  SIMON_DECRYPT    = 3'b011,
+  SIMON_ENCRYPT_CL = 3'b100,
+  SIMON_DECRYPT_CL = 3'b101
 } simon_op_e /*verilator public*/;
 
 module simon_core #(
@@ -27,19 +29,22 @@ module simon_core #(
     output logic        ready_o,
     output logic        data_valid_o,
     output wire [SIMON_DATA_W-1:0] data_o
+
 );
   logic [(SIMON_DATA_W/2)-1:0] key_table[0:SIMON_ROUNDS - 1];
   logic keyexpand_valid_o, encrypt_valid_o, decrypt_valid_o;
   logic keyexpand_ready_o, encrypt_ready_o, decrypt_ready_o;
   logic [SIMON_DATA_W-1:0] enc_data_o;
   logic [SIMON_DATA_W-1:0] dec_data_o;
+  logic [SIMON_DATA_W-1:0] enc_cl_data_o;
+  logic [SIMON_DATA_W-1:0] dec_cl_data_o;
 
   simon_core_keyexpand #(
   .SIMON_KEY_W            (SIMON_KEY_W),
   .SIMON_DATA_W           (SIMON_DATA_W),
   .SIMON_ROUNDS           (SIMON_ROUNDS),
   .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
-) keyexpand_inst (
+  ) keyexpand_inst (
    .clk               (clk),
    .rst               (rst),
    .enable            (key_valid_i),
@@ -51,12 +56,22 @@ module simon_core #(
    .ready_o           (keyexpand_ready_o)
   );
 
+  simon_cl_encryptor #(
+   .SIMON_KEY_W           (SIMON_KEY_W),
+   .SIMON_DATA_W          (SIMON_DATA_W),
+   .SIMON_ROUNDS          (SIMON_ROUNDS)
+  ) cl_encryptor_inst (
+   .enc_in                (data_i),
+   .key_expanded          (key_table),
+   .enc_out               (enc_cl_data_o)
+  );
+
   simon_core_encryptor #(
   .SIMON_KEY_W            (SIMON_KEY_W),
   .SIMON_DATA_W           (SIMON_DATA_W),
   .SIMON_ROUNDS           (SIMON_ROUNDS),
   .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
-) encryptor_inst (
+  ) encryptor_inst (
    .clk               (clk),
    .rst               (rst),
    .enable            (data_valid_i),
@@ -69,12 +84,22 @@ module simon_core #(
    .ready_o           (encrypt_ready_o)
   );
 
+  simon_cl_decryptor #(
+   .SIMON_KEY_W           (SIMON_KEY_W),
+   .SIMON_DATA_W          (SIMON_DATA_W),
+   .SIMON_ROUNDS          (SIMON_ROUNDS)
+  ) cl_decryptor_inst (
+   .dec_in                (data_i),
+   .key_expanded          (key_table),
+   .dec_out               (dec_cl_data_o)
+  );
+
   simon_core_decryptor #(
   .SIMON_KEY_W            (SIMON_KEY_W),
   .SIMON_DATA_W           (SIMON_DATA_W),
   .SIMON_ROUNDS           (SIMON_ROUNDS),
   .SIMON_ROUNDS_PER_CYCLE (SIMON_ROUNDS_PER_CYCLE)
-) decryptor_inst (
+  ) decryptor_inst (
    .clk               (clk),
    .rst               (rst),
    .enable            (data_valid_i),
@@ -96,6 +121,9 @@ module simon_core #(
       SIMON_KEYEXPAND:    data_o = 0;
       SIMON_ENCRYPT:      data_o = enc_data_o;
       SIMON_DECRYPT:      data_o = dec_data_o;
+      SIMON_ENCRYPT_CL:   data_o = enc_cl_data_o;
+      SIMON_DECRYPT_CL:   data_o = dec_cl_data_o;
+      default:            data_o = 0;
     endcase
   end
 
@@ -265,6 +293,47 @@ module simon_core_keyexpand #(
   end  
 endmodule
 
+module simon_cl_encryptor #(
+   parameter int unsigned SIMON_KEY_W,
+   parameter int unsigned SIMON_DATA_W,
+   parameter bit [6:0] SIMON_ROUNDS
+) (
+   input  wire  [SIMON_DATA_W-1:0] enc_in,
+   input  logic [(SIMON_DATA_W/2)-1:0] key_expanded[0:SIMON_ROUNDS - 1],
+   output logic [SIMON_DATA_W-1:0] enc_out
+);
+  typedef logic [$clog2(SIMON_ROUNDS+1)-1:0] xy_idx_t;
+  wire [(SIMON_DATA_W/2)-1:0] y_words[0:SIMON_ROUNDS]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] x_words[0:SIMON_ROUNDS]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] temp[0:SIMON_ROUNDS]  /*verilator split_var*/;
+
+  genvar i;
+  generate
+
+    assign x_words[0] = enc_in[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
+    assign y_words[0] = enc_in[(SIMON_DATA_W/2)-1:0];
+
+    for(i=0; i < SIMON_ROUNDS; i++) begin : gencipher
+      // Shift, AND, XOR ops
+      // assign temp[i] = ((((x_words[i] << 1) | (x_words[i]
+      //                       >> (`WORD_SIZE - 1))) & ((x_words[i] << 8) | (x_words[i]
+      //                       >> (`WORD_SIZE - 8))))  ^ y_words[i] ^ ((x_words[i] << 2)
+      //                       | (x_words[i] >> (`WORD_SIZE - 2))));
+      assign temp[i] = (({x_words[i][(SIMON_DATA_W/2)-2:0], x_words[i][(SIMON_DATA_W/2)-1]}
+                         & {x_words[i][(SIMON_DATA_W/2)-9:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-8]})
+                        ^ y_words[i]
+                        ^ {x_words[i][(SIMON_DATA_W/2)-3:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-2]});
+      // cross the results
+      assign y_words[i + 1] = x_words[i];
+      // XOR with round key
+      assign x_words[i + 1] = temp[i] ^ key_expanded[i];
+    end
+  endgenerate
+
+  assign enc_out = {x_words[xy_idx_t'(SIMON_ROUNDS)], y_words[xy_idx_t'(SIMON_ROUNDS)]};
+
+endmodule
+
 module simon_core_encryptor #(
    parameter int unsigned SIMON_KEY_W,
    parameter int unsigned SIMON_DATA_W,
@@ -321,7 +390,7 @@ module simon_core_encryptor #(
   
   genvar i;
   generate
-                
+
     assign x_words[0] = x_ff;
     assign y_words[0] = y_ff;
 
@@ -480,6 +549,47 @@ module simon_core_encryptor #(
       end
     end
   end
+endmodule
+
+module simon_cl_decryptor #(
+   parameter int unsigned SIMON_KEY_W,
+   parameter int unsigned SIMON_DATA_W,
+   parameter bit [6:0] SIMON_ROUNDS
+) (
+   input  wire  [SIMON_DATA_W-1:0] dec_in,
+   input  logic [(SIMON_DATA_W/2)-1:0] key_expanded[0:SIMON_ROUNDS - 1],
+   output logic [SIMON_DATA_W-1:0] dec_out
+);
+  typedef logic [$clog2(SIMON_ROUNDS+1)-1:0] xy_idx_t;
+  wire [(SIMON_DATA_W/2)-1:0] y_words[0:SIMON_ROUNDS]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] x_words[0:SIMON_ROUNDS]  /*verilator split_var*/;
+  wire [(SIMON_DATA_W/2)-1:0] temp[0:SIMON_ROUNDS]  /*verilator split_var*/;
+
+  genvar i;
+  generate
+
+    assign x_words[0] = dec_in[(SIMON_DATA_W/2)-1:0];
+    assign y_words[0] = dec_in[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
+
+    for(i=0; i < SIMON_ROUNDS; i++) begin : gencipher
+      // Shift, AND, XOR ops
+      // assign temp[i] = ((((x_words[i] << 1) | (x_words[i]
+      //                       >> (`WORD_SIZE - 1))) & ((x_words[i] << 8) | (x_words[i]
+      //                       >> (`WORD_SIZE - 8))))  ^ y_words[i] ^ ((x_words[i] << 2)
+      //                       | (x_words[i] >> (`WORD_SIZE - 2))));
+      assign temp[i] = (({x_words[i][(SIMON_DATA_W/2)-2:0], x_words[i][(SIMON_DATA_W/2)-1]}
+                         & {x_words[i][(SIMON_DATA_W/2)-9:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-8]})
+                        ^ y_words[i]
+                        ^ {x_words[i][(SIMON_DATA_W/2)-3:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-2]});
+      // cross the results
+      assign y_words[i + 1] = x_words[i];
+      // XOR with round key
+      assign x_words[i + 1] = temp[i] ^ key_expanded[(SIMON_ROUNDS - i - 1)];
+    end
+  endgenerate
+
+  assign dec_out ={y_words[xy_idx_t'(SIMON_ROUNDS)], x_words[xy_idx_t'(SIMON_ROUNDS)]};
+
 endmodule
 
 module simon_core_decryptor #(

@@ -147,7 +147,6 @@ module simon_core_keyexpand #(
       k[i] <= 64'hFFFFFFFFFFFFFFFC ^ k[i-2] ^ tmp ^ {63'h0, z[i-2]}
   end for
   */
-
   localparam int unsigned SIMON_ROUNDS_LOG2 = $clog2(SIMON_ROUNDS);
   localparam int unsigned SIMON_WORDS_PER_KEY = (SIMON_KEY_W/SIMON_DATA_W) * 2;
 
@@ -155,20 +154,18 @@ module simon_core_keyexpand #(
   logic [(SIMON_DATA_W/2)-1:0] tmp1;
   logic [(SIMON_DATA_W/2)-1:0] tmp1a;
   logic [(SIMON_DATA_W/2)-1:0] tmp2;
-  logic           busy;
-  logic [SIMON_ROUNDS_LOG2-1:0]     current_iter, current_iter_minus1, next_iter;
-  logic           local_keytab_valid_o;
+  logic ready_q;
+  logic [SIMON_ROUNDS_LOG2-1:0] current_iter_q;
+  logic keytab_valid_q;
   logic [(SIMON_DATA_W/2)-1:0] key_words[0:SIMON_ROUNDS - 1];
 
-  assign ready_o = !busy;
+  assign ready_o = ready_q;
+  assign keytab_valid_o = keytab_valid_q;
 
-  assign keytab_valid_o = local_keytab_valid_o;
-
-  assign tmp0 = key_words[current_iter_minus1];
+  assign tmp0 = key_words[current_iter_q-1];
   assign tmp1 = {tmp0[2:0], tmp0[(SIMON_DATA_W/2)-1:3]};
-  assign tmp1a = tmp1 ^ ((SIMON_WORDS_PER_KEY == 4) ? key_words[current_iter-3] : 0);
+  assign tmp1a = tmp1 ^ ((SIMON_WORDS_PER_KEY == 4) ? key_words[current_iter_q-3] : 0);
   assign tmp2 =  tmp1a ^ {tmp1a[0], tmp1a[(SIMON_DATA_W/2)-1:1]};
-  assign next_iter = current_iter + 1;
   logic [(SIMON_DATA_W/2)-1:0] key_words_in0, key_words_in1, key_words_in2, key_words_in3;
   logic [65:0] z;
 
@@ -200,36 +197,26 @@ module simon_core_keyexpand #(
   endgenerate
 
   always_ff @(posedge clk) begin
-`ifdef notdef
-    if (busy) begin
-      $display("%t %m key_expander.local_keytab_valid_o=%d", $time, local_keytab_valid_o);
-      $display("%t %m key_expander.current_iter=%d", $time, current_iter);
-      $display("%t %m key_expander.current_iter_minus1=%d", $time, current_iter_minus1);
-    end
-`endif /* notdef */
     if (rst) begin
-      busy <= `false;
-      local_keytab_valid_o <= `false;
-      current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
-      current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
+      ready_q <= `true;
+      keytab_valid_q <= `false;
+      current_iter_q <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
       key_words <= '{default:'0};
-      keytab <= '{default:'0};
     end
     else begin
       // In the middle of doing a key expansion
-      if (busy) begin
-        if (local_keytab_valid_o) begin
+      if (!ready_q) begin
+        if (keytab_valid_q) begin
             // Output has been latched and we can reset everything
-            busy <= `false;
-            local_keytab_valid_o <= `false;
-            current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
-            current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
+            ready_q <= `true;
+            keytab_valid_q <= `false;
+            current_iter_q <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
         end
         // Not done yet
         else begin 
           // On last round
-          if (current_iter == SIMON_ROUNDS[SIMON_ROUNDS_LOG2-1:0]) begin
-            local_keytab_valid_o <= `true;
+          if (current_iter_q == SIMON_ROUNDS[SIMON_ROUNDS_LOG2-1:0]) begin
+            keytab_valid_q <= `true;
             keytab <= key_words;
 `ifdef notdef
             foreach(key_words[q]) $display("%t %m key_words[%d]=0x%x", $time, q, key_words[q]);
@@ -237,12 +224,11 @@ module simon_core_keyexpand #(
           end
           // Not on last round yet
           else begin
-            key_words[current_iter] <= (SIMON_DATA_W/2)'(64'h0 - 4)
-                                       ^ key_words[current_iter-((SIMON_DATA_W == 128) ? 2 : 4)]
+            key_words[current_iter_q] <= (SIMON_DATA_W/2)'(64'h0 - 4)
+                                       ^ key_words[current_iter_q-((SIMON_DATA_W == 128) ? 2 : 4)]
                                        ^ tmp2
-                                       ^ {{((SIMON_DATA_W/2)-1){1'b0}}, z[current_iter-((SIMON_DATA_W == 128) ? 2 : 4)]};
-            current_iter <= next_iter;
-            current_iter_minus1 <= next_iter - 1;
+                                       ^ {{((SIMON_DATA_W/2)-1){1'b0}}, z[current_iter_q-((SIMON_DATA_W == 128) ? 2 : 4)]};
+            current_iter_q <= current_iter_q + 1;
           end
         end
       end
@@ -250,12 +236,10 @@ module simon_core_keyexpand #(
       else begin
         // Can handle incoming request
         if (key_valid_i) begin
-          current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
-          current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
-          busy <= `true;
+          current_iter_q <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
+          ready_q <= `false;
           // Set first two elements of key table to original key
           // Compiler wouldn't let me do this a nicer way
-          //key_words[0:1] <= {key_in[0:7], key_in[8:15]};
           key_words[0] <= key_words_in0;
           key_words[1] <= key_words_in1;
           key_words[2] <= key_words_in2;
@@ -265,11 +249,10 @@ module simon_core_keyexpand #(
 `endif /* notdef */
         end
         // Idle and no incoming request
-        else begin
-          current_iter <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
-          current_iter_minus1 <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0]-1;
-          busy <= `false;
-        end
+//        else begin
+//          current_iter_q <= SIMON_WORDS_PER_KEY[SIMON_ROUNDS_LOG2-1:0];
+//          busy <= `false;
+//        end
       end
     end
   end  

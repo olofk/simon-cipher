@@ -86,9 +86,9 @@ module simon_core #(
    .SIMON_DATA_W          (SIMON_DATA_W),
    .SIMON_ROUNDS          (SIMON_ROUNDS)
   ) cl_decryptor_inst (
-   .dec_in                (data_i),
-   .keytab                (keytab),
-   .dec_out               (dec_cl_data_o)
+   .data_i                (data_i),
+   .keytab_i              (keytab),
+   .data_o                (dec_cl_data_o)
   );
 
   simon_core_decryptor #(
@@ -99,10 +99,10 @@ module simon_core #(
    .clk               (clk),
    .rst               (rst),
    .data_valid_i      (data_valid_i),
-   .dec_in            (data_i),
-   .dec_out           (dec_data_o),
-   .keytab            (keytab),
-   .dec_valid_o       (dec_valid_o),
+   .data_i            (data_i),
+   .keytab_i          (keytab),
+   .data_valid_o      (dec_valid_o),
+   .data_o            (dec_data_o),
    .ready_o           (dec_ready_o)
   );
 
@@ -313,9 +313,9 @@ module simon_core_encryptor #(
   logic [6:0] roundCount_q;
   logic data_valid_q;
 
-  assign ready_o = ready_q;
-  assign data_o = data_q;
   assign data_valid_o  = data_valid_q;
+  assign data_o = data_q;
+  assign ready_o = ready_q;
 
   genvar i;
   generate
@@ -328,7 +328,6 @@ module simon_core_encryptor #(
       //                       >> (`WORD_SIZE - 1))) & ((x_words[i] << 8) | (x_words[i]
       //                       >> (`WORD_SIZE - 8))))  ^ y_words[i] ^ ((x_words[i] << 2) 
       //                       | (x_words[i] >> (`WORD_SIZE - 2))));
-
       assign temp[i] = (({x_words[i][(SIMON_DATA_W/2)-2:0], x_words[i][(SIMON_DATA_W/2)-1]}
                          & {x_words[i][(SIMON_DATA_W/2)-9:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-8]})
                         ^ y_words[i]
@@ -352,82 +351,59 @@ module simon_core_encryptor #(
       data_q <= 0;
     end
 
-    // STATE: new request
-    // else if (ready_q && data_valid_i) begin
-    else begin
-      //cycleCount <= cycleCount + 1;
-      if (!ready_q) begin
-        if (data_valid_q) begin
-          // Output has been latched and we can reset everything
-          ready_q <= `true;
-          data_valid_q  <= `false;
-          roundCount_q <= 0;
-          y_ff <= 0;
-          x_ff <= 0;
-        end
-        else begin
-          /* verilator lint_off UNSIGNED */
-          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount_q < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount_q < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin /* verilator lint_on UNSIGNED */
-              
-            // In body, still have work to do -- perform an intermediate latch now
-            ready_q <= ready_q;
-            roundCount_q <= roundCount_q + SIMON_ROUNDS_PER_CYCLE;
-            y_ff <= y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
-            x_ff <= x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
-          end
-          else begin
-            if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) begin
-              // Finishing up the tail; latch from tail and set output to valid
-              ready_q <= ready_q;
-              data_valid_q <= `true;
-              roundCount_q <= roundCount_q + (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE);
-              y_ff <= y_ff; // Don't care
-              x_ff <= x_ff; // Don't care
-              data_q <= {x_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], y_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
-`ifdef SIMON_DEBUG
-              $display("%t ++++++ Simon ENC out (tail) ++++++", $time);
-              $display("%t %m simon_enc.data_q=0x%x", $time,
-                      {x_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], y_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]});
-              $display("%t %m simon_enc.roundCount_q=%d", $time, roundCount_q + (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE));
-              $display("%t ------ Simon ENC out (tail) ------", $time);
-`endif /* SIMON_DEBUG */
-            end
-            else begin
-              // Finishing up with no tail; latch from body and set output to valid
-              ready_q <= ready_q;
-              data_valid_q <= `true;
-              roundCount_q <= roundCount_q + SIMON_ROUNDS_PER_CYCLE; 
-              y_ff <= y_ff; // Don't care
-              x_ff <= x_ff; // Don't care
-              data_q <= {x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)], y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)]};
-`ifdef SIMON_DEBUG
-              $display("%t ++++++ Simon ENC out (no tail) ++++++", $time);
-              $display("%t %m simon_enc.data_q=0x%x", $time,
-                       {x_words[SIMON_ROUNDS_PER_CYCLE], y_words[SIMON_ROUNDS_PER_CYCLE]});
-              $display("%t %m simon_enc.roundCount_q=%d", $time, roundCount_q + SIMON_ROUNDS_PER_CYCLE);
-              $display("%t ------ Simon ENC out (no tail) ------", $time);
-`endif /* SIMON_DEBUG */
-            end
-          end
-        end
-      end
-      else begin
-        if (data_valid_i) begin
-          // We're available and a request is being made -- latch input
-          ready_q <= `false;
-          x_ff <= data_i[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
-          y_ff <= data_i[(SIMON_DATA_W/2)-1:0];
-          roundCount_q <= 0;
-        end
-        else begin
-          // We're available but no one needs us right now -- should be able to just maintain state
-          ready_q <= `true;
-          x_ff <= 0;
-          y_ff <= 0;
-          roundCount_q <= 0;
-        end
-      end
+    // STATE: new request, so latch input
+    else if (ready_q && data_valid_i) begin
+      ready_q <= `false;
+      x_ff <= data_i[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
+      y_ff <= data_i[(SIMON_DATA_W/2)-1:0];
+      roundCount_q <= 0;
     end
+
+    // STATE: ongoing key expansion and not the last iteration
+    else if (!ready_q && !data_valid_q) begin
+
+      // SUBSTATE: not the last iteration, still have work to do -- perform an intermediate latch now
+      /* verilator lint_off UNSIGNED */
+      if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount_q < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE)
+          || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount_q < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
+      /* verilator lint_on UNSIGNED */
+        roundCount_q <= roundCount_q + SIMON_ROUNDS_PER_CYCLE;
+        y_ff <= y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
+        x_ff <= x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
+      end
+
+      // SUBSTATE: finishing up the short tail; latch from tail and set output to valid
+      else if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) begin
+        data_valid_q <= `true;
+        data_q <= {x_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], y_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
+        // cleanup internal state
+        roundCount_q <= 0;
+        y_ff <= 0; 
+        x_ff <= 0; 
+      end
+
+      // SUBSTATE: finishing up with no perfect-multiple tail; latch from body and set output to valid
+      else if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) begin
+        data_valid_q <= `true;
+        data_q <= {x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)], y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)]};
+        // cleanup internal state
+        roundCount_q <= 0;
+        y_ff <= 0; 
+        x_ff <= 0; 
+      end
+
+    end
+
+    // STATE: output has been delivered and we can reset everything
+    else if (!ready_q && data_valid_q) begin
+      // output has been latched and we can reset everything
+      ready_q <= `true;
+      data_valid_q  <= `false;
+      roundCount_q <= 0;
+      y_ff <= 0;
+      x_ff <= 0;
+    end
+
   end
 endmodule
 
@@ -435,9 +411,9 @@ module simon_cl_decryptor #(
    parameter int unsigned SIMON_DATA_W,
    parameter bit [6:0] SIMON_ROUNDS
 ) (
-   input  logic [SIMON_DATA_W-1:0] dec_in,
-   input  logic [(SIMON_DATA_W/2)-1:0] keytab[0:SIMON_ROUNDS - 1],
-   output logic [SIMON_DATA_W-1:0] dec_out
+   input  logic [SIMON_DATA_W-1:0] data_i,
+   input  logic [(SIMON_DATA_W/2)-1:0] keytab_i[0:SIMON_ROUNDS - 1],
+   output logic [SIMON_DATA_W-1:0] data_o
 );
   typedef logic [$clog2(SIMON_ROUNDS+1)-1:0] xy_idx_t;
   logic [(SIMON_DATA_W/2)-1:0] y_words[0:SIMON_ROUNDS]  /*verilator split_var*/;
@@ -446,9 +422,8 @@ module simon_cl_decryptor #(
 
   genvar i;
   generate
-
-    assign x_words[0] = dec_in[(SIMON_DATA_W/2)-1:0];
-    assign y_words[0] = dec_in[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
+    assign x_words[0] = data_i[(SIMON_DATA_W/2)-1:0];
+    assign y_words[0] = data_i[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
 
     for(i=0; i < SIMON_ROUNDS; i++) begin : gencipher
       // Shift, AND, XOR ops
@@ -463,11 +438,11 @@ module simon_cl_decryptor #(
       // cross the results
       assign y_words[i + 1] = x_words[i];
       // XOR with round key
-      assign x_words[i + 1] = temp[i] ^ keytab[(SIMON_ROUNDS - i - 1)];
+      assign x_words[i + 1] = temp[i] ^ keytab_i[(SIMON_ROUNDS - i - 1)];
     end
   endgenerate
 
-  assign dec_out ={y_words[xy_idx_t'(SIMON_ROUNDS)], x_words[xy_idx_t'(SIMON_ROUNDS)]};
+  assign data_o ={y_words[xy_idx_t'(SIMON_ROUNDS)], x_words[xy_idx_t'(SIMON_ROUNDS)]};
 
 endmodule
 
@@ -479,11 +454,11 @@ module simon_core_decryptor #(
    input  logic  clk,
    input  logic  rst,
    input  logic  data_valid_i,
-   input  logic  [SIMON_DATA_W-1:0] dec_in,
-   input  logic  [(SIMON_DATA_W/2)-1:0] keytab[0:SIMON_ROUNDS - 1],
-   output logic  ready_o,
-   output logic  [SIMON_DATA_W-1:0] dec_out,
-   output logic  dec_valid_o
+   input  logic  [SIMON_DATA_W-1:0] data_i,
+   input  logic  [(SIMON_DATA_W/2)-1:0] keytab_i[0:SIMON_ROUNDS - 1],
+   output logic  data_valid_o,
+   output logic  [SIMON_DATA_W-1:0] data_o,
+   output logic  ready_o
 );
   typedef logic [$clog2(SIMON_ROUNDS_PER_CYCLE+1)-1:0] xy_idx_t;
 
@@ -491,51 +466,18 @@ module simon_core_decryptor #(
   logic [(SIMON_DATA_W/2)-1:0] x_words[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
   logic [(SIMON_DATA_W/2)-1:0] y_ff;
   logic [(SIMON_DATA_W/2)-1:0] x_ff;
-  logic busy;
   logic [(SIMON_DATA_W/2)-1:0] temp[0:SIMON_ROUNDS_PER_CYCLE]  /*verilator split_var*/;
+  logic ready_q;
+  logic [SIMON_DATA_W-1:0] data_q;
+  logic [6:0] roundCount_q;
+  logic data_valid_q;
 
-  logic [6:0] roundCount;
-  logic local_dec_valid_o;
+  assign data_valid_o = data_valid_q;
+  assign data_o = data_q;
+  assign ready_o = ready_q;
 
-  assign ready_o = !busy;
-  assign dec_valid_o = local_dec_valid_o;
-
-`ifdef notdef
-  initial begin
-    $monitor("%t %m rst=%d", $time, rst);
-    $monitor("%t %m local_dec_valid_o=%d", $time, local_dec_valid_o);
-  end
-`endif /* notdef */
-
-`ifdef notdef
-  always_comb begin
-    $strobe("%t %m rst=%d", $time, rst);
-    $strobe("%t %m local_dec_valid_o=%d", $time, local_dec_valid_o);
-  end
-`endif /* notdef */
-
-`ifdef notdef
-  always_comb begin
-    //$display("dec input: %h", dec_in);
-    //$write("x_words[%d]: %h, ", 0, x_words[0]);
-    //$write("y_words[%d]: %h, ", 0, y_words[0]);
-
-    //$display("rst: %h", rst);
-    //$display("data_valid_i: %h", data_valid_i);
-    //$display("busy: %h", busy);
-    $monitor("x_ff: %h", x_ff);
-    $monitor("y_ff: %h", y_ff);
-    //$display("dec output: %h", dec_out);
-    //$display("output valid: %b", local_dec_valid_o);
-    //$display("Done: %b", done);
-    $display("roundCount: %d", roundCount);
-    //$display("cycleCount: %d", cycleCount);
-  end
-`endif /* notdef */
-  
   genvar i;
   generate
-                
     assign x_words[0] = x_ff;
     assign y_words[0] = y_ff;
 
@@ -545,121 +487,82 @@ module simon_core_decryptor #(
       //                       >> (`WORD_SIZE - 1))) & ((x_words[i] << 8) | (x_words[i]
       //                       >> (`WORD_SIZE - 8))))  ^ y_words[i] ^ ((x_words[i] << 2) 
       //                       | (x_words[i] >> (`WORD_SIZE - 2))));
-      assign temp[i] = (( {x_words[i][(SIMON_DATA_W/2)-2:0], x_words[i][(SIMON_DATA_W/2)-1]} /* ((x_words[i] << 1) | (x_words[i] >> (`WORD_SIZE - 1))) */
-                          & {x_words[i][(SIMON_DATA_W/2)-9:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-8]} /* ((x_words[i] << 8) | (x_words[i] >> (`WORD_SIZE - 8))) */
-                        )
+      assign temp[i] = (({x_words[i][(SIMON_DATA_W/2)-2:0], x_words[i][(SIMON_DATA_W/2)-1]}
+                         & {x_words[i][(SIMON_DATA_W/2)-9:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-8]})
                         ^ y_words[i]
-                        ^ {x_words[i][(SIMON_DATA_W/2)-3:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-2]} /* ((x_words[i] << 2) | (x_words[i] >> (`WORD_SIZE - 2))) */
-                       );
-      
-      // Calculate the cycle count
-      //assign cycleCount = (i == `SIMON_ROUNDS_PER_CYCLE - 1) ? (cycleCount + 1) : cycleCount;  
+                        ^ {x_words[i][(SIMON_DATA_W/2)-3:0], x_words[i][(SIMON_DATA_W/2)-1:(SIMON_DATA_W/2)-2]});
       // Feistel Cross        
       assign y_words[i + 1] = x_words[i];
       // XOR with round key  
-      // TMA: assign x_words[i + 1] = temp[i] ^ keytab[`SIMON_ROUNDS - (roundCount + i) - 1];
-      assign x_words[i + 1] = temp[i] ^ keytab[(SIMON_ROUNDS - i - 1) - roundCount];
-       
-`ifdef notdef
-      always_comb begin
-        $write("x_words[%d]: %h, ", i + 1, x_words[i + 1]);
-        $write("y_words[%d]: %h, ", i + 1, y_words[i + 1]);
-        $display("temp[%d]: %h", i + 1, temp[i + 1]);
-      end
-`endif /* notdef */
+      assign x_words[i + 1] = temp[i] ^ keytab_i[(SIMON_ROUNDS - i - 1) - roundCount_q];
     end
   endgenerate
 
   always_ff @(posedge clk) begin
           
+    // STATE: handle reset
     if (rst) begin
-      busy <= `false;
-      local_dec_valid_o <= `false;
-      roundCount <= 0;
+      ready_q <= `true;
+      data_valid_q <= `false;
+      roundCount_q <= 0;
       y_ff <= 0;
       x_ff <= 0;
-      dec_out <= 0;
+      data_q <= 0;
     end
-    else begin
-      if (busy) begin
-        if (local_dec_valid_o) begin
-          // Output has been latched and we can reset everything
-          busy <= `false;
-          local_dec_valid_o <= `false;
-          roundCount <= 0;
-          y_ff <= 0;
-          x_ff <= 0;
-        end
-        else begin
-          /* verilator lint_off UNSIGNED */
-          if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE) || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin /* verilator lint_on UNSIGNED */
-            // In body, still have work to do -- perform an intermediate latch now
-            busy <= busy;
-            roundCount <= roundCount + SIMON_ROUNDS_PER_CYCLE;
-            y_ff <= y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
-            x_ff <= x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
-          end
-          else begin
-            if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) begin
-              // Finishing up the tail; latch from tail and set output to valid
-              busy <= busy;
-              local_dec_valid_o <= `true;
-              roundCount <= roundCount + (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE);
-              y_ff <= y_ff; // Don't care
-              x_ff <= x_ff; // Don't care
-              dec_out <= {y_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], x_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
-`ifdef SIMON_DEBUG
-              $display("%t ++++++ Simon DEC out (tail) ++++++", $time);
-              $display("%t %m simon_dec.dec_out=0x%x", $time,
-                      {y_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], x_words[(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]});
-              $display("%t %m simon_dec.roundCount=%d", $time, roundCount + (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE));
-              $display("%t ------ Simon DEC out (tail) ------", $time);
-`endif /* SIMON_DEBUG */
-            end
-            else begin
-              // Finishing up with no tail; latch from body and set output to valid
-              busy <= busy;
-              local_dec_valid_o <= `true;
-              roundCount <= roundCount + SIMON_ROUNDS_PER_CYCLE; 
-              y_ff <= y_ff; // Don't care
-              x_ff <= x_ff; // Don't care
-              dec_out <= {y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)], x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)]};
-              //done <= 2;
-`ifdef SIMON_DEBUG
-              $display("%t ++++++ Simon DEC out (no tail) ++++++", $time);
-              $display("%t %m simon_dec.dec_out=0x%x", $time, {y_words[SIMON_ROUNDS_PER_CYCLE], x_words[SIMON_ROUNDS_PER_CYCLE]});
-              $display("%t %m simon_dec.roundCount=%d", $time, roundCount + SIMON_ROUNDS_PER_CYCLE);
-              $display("%t ------ Simon DEC out (no tail) ------", $time);
-`endif /* SIMON_DEBUG */
-            end
-          end
-        end
-      end
-      else begin
-        if (data_valid_i) begin
-          // We're available and a request is being made -- latch input
-          busy <= `true;
-          y_ff <= dec_in[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
-          x_ff <= dec_in[(SIMON_DATA_W/2)-1:0];
-          roundCount <= 0;
-`ifdef SIMON_DEBUG
-          $display("%t ++++++ Simon DEC in  ++++++", $time);
-          $display("%t %m simon_dec.y_ff=0x%x", $time, dec_in[127:64]);
-          $display("%t %m simon_dec.x_ff=0x%x", $time, dec_in[63:0]);
-          $display("%t %m simon_dec.roundCount=%d", $time, 0);
-          $display("%t %m simon_dec.local_dec_valid_o=%d", $time, local_dec_valid_o);
-          $display("%t ------ Simon DEC in  ------", $time);
-`endif /* SIMON_DEBUG */
-        end
-        else begin
-          // We're available but no one needs us right now -- should be able to just maintain state
-          busy <= `false;
-          x_ff <= 0;
-          y_ff <= 0;
-          roundCount <= 0;
-        end
-      end
+
+    // STATE: new request, so latch input
+    else if (ready_q && data_valid_i) begin
+      ready_q <= `false;
+      y_ff <= data_i[SIMON_DATA_W-1:(SIMON_DATA_W/2)];
+      x_ff <= data_i[(SIMON_DATA_W/2)-1:0];
+      roundCount_q <= 0;
     end
+
+    // STATE: ongoing key expansion and not the last iteration
+    else if (!ready_q && !data_valid_q) begin
+
+      // SUBSTATE: not the last iteration, still have work to do -- perform an intermediate latch now
+      /* verilator lint_off UNSIGNED */
+      if ((((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) && roundCount_q < SIMON_ROUNDS - SIMON_ROUNDS_PER_CYCLE)
+          || (((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) && roundCount_q < SIMON_ROUNDS - (SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE))) begin
+      /* verilator lint_on UNSIGNED */
+        roundCount_q <= roundCount_q + SIMON_ROUNDS_PER_CYCLE;
+        y_ff <= y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
+        x_ff <= x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)];
+      end
+
+      // SUBSTATE: finishing up the short tail; latch from tail and set output to valid
+      else if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) != 0) begin
+        // Finishing up the tail; latch from tail and set output to valid
+        data_valid_q <= `true;
+        data_q <= {y_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)], x_words[xy_idx_t'(SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE)]};
+        // cleanup internal state
+        roundCount_q <= 0;
+        y_ff <= 0;
+        x_ff <= 0;
+      end
+
+      // SUBSTATE: finishing up with no perfect-multiple tail; latch from body and set output to valid
+      else if ((SIMON_ROUNDS % SIMON_ROUNDS_PER_CYCLE) == 0) begin
+        data_valid_q <= `true;
+        data_q <= {y_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)], x_words[xy_idx_t'(SIMON_ROUNDS_PER_CYCLE)]};
+        // cleanup internal state
+        roundCount_q <= 0;
+        y_ff <= 0;
+        x_ff <= 0;
+      end
+
+    end
+
+    // STATE: output has been delivered and we can reset everything
+    else if (!ready_q && data_valid_q) begin
+      ready_q <= `true;
+      data_valid_q <= `false;
+      roundCount_q <= 0;
+      y_ff <= 0;
+      x_ff <= 0;
+    end
+
   end
 endmodule
 

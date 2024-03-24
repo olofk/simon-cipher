@@ -7,6 +7,7 @@
 `define true  1'b1
 `define false 1'b0
 
+// these are the crypto opterations that the SIMON_CORE module supports
 typedef enum logic [2:0] {
   SIMON_IDLE       = 3'b000,
   SIMON_KEYEXPAND  = 3'b001,
@@ -16,24 +17,25 @@ typedef enum logic [2:0] {
   SIMON_DECRYPT_CL = 3'b101
 } simon_op_e /*verilator public*/;
 
+// 
+// SIMON_CORE: This is a test driver module used by tb_simon_core.cpp
+//
 module simon_core #(
-   parameter int unsigned SIMON_KEY_W,
-   parameter int unsigned SIMON_DATA_W,
-   parameter bit [6:0] SIMON_ROUNDS,
-   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE
+   parameter int unsigned SIMON_KEY_W,            // SIMON key size (in bits), 64 and 128-bits are supported
+   parameter int unsigned SIMON_DATA_W,           // SIMON data size (in bits), 32, 64, and 128-bits are supported
+   parameter bit [6:0] SIMON_ROUNDS,              // SIMON rounds to execute during encryption/decryption
+   parameter bit [6:0] SIMON_ROUNDS_PER_CYCLE     // SIMON rounds to execute each cycle, leading to pipelined implementations
 ) (
-    input  logic        clk, rst,
-    // input ports
-    input  simon_op_e   op_i,
-    input  logic        key_valid_i,
-    input  logic [7:0]  key_i [0:(SIMON_KEY_W/8)-1],
-    input  logic        data_valid_i,
-    input  logic [SIMON_DATA_W-1:0] data_i,
-
-    // output ports
-    output logic        ready_o,
-    output logic        data_valid_o,
-    output logic [SIMON_DATA_W-1:0] data_o
+    input  logic        clk,                      // system clock signal
+    input  logic        rst,                      // system reset signal, asserted high
+    input  simon_op_e   op_i,                     // INPUT: crypto operation to execute
+    input  logic        key_valid_i,              // INPUT: assert this signal to transfer a key value to the SIMON core
+    input  logic [7:0]  key_i [0:(SIMON_KEY_W/8)-1], // INPUT: SIMON key to expand
+    input  logic        data_valid_i,             // INPUT: assert this signal to transfer a data value to the SIMON core
+    input  logic [SIMON_DATA_W-1:0] data_i,       // INPUT: SIMON data input
+    output logic        data_valid_o,             // OUTPUT: this signal is asserted to indicate that an output valid is available
+    output logic [SIMON_DATA_W-1:0] data_o,       // OUTPUT: SIMON core data output
+    output logic        ready_o                   // OUTPUT: asserted when the SIMON core is ready for a new request
 
 );
   logic [(SIMON_DATA_W/2)-1:0] keytab[0:SIMON_ROUNDS - 1];
@@ -123,18 +125,25 @@ module simon_core #(
 
 endmodule;
 
+//
+// SIMON module key expansion: given a "key_i" value, that is latched on
+// "key_valid_i", this module will perform key expansion that is copied to
+// "keytab_o" memory, at which point "keytab_valid_o" indicates the keytable
+// is ready, "ready_o" indicates when the module is available for another
+// request
+//
 module simon_core_keyexpand #(
-   parameter int unsigned SIMON_KEY_W,
-   parameter int unsigned SIMON_DATA_W,
-   parameter bit [6:0] SIMON_ROUNDS
+   parameter int unsigned SIMON_KEY_W,                // SIMON key size (in bits), 64 and 128-bits are supported
+   parameter int unsigned SIMON_DATA_W,               // SIMON data size (in bits), 32, 64, and 128-bits are supported
+   parameter bit [6:0] SIMON_ROUNDS                   // SIMON rounds to execute during encryption/decryption
 ) (
-   input  logic       clk,
-   input  logic       rst,
-   input  logic       key_valid_i,
-   input  logic [7:0] key_i [0:(SIMON_KEY_W/8)-1],
-   output logic       keytab_valid_o,
-   output logic [(SIMON_DATA_W/2)-1:0] keytab_o[0:SIMON_ROUNDS - 1],
-   output logic       ready_o
+   input  logic       clk,                            // system clock signal
+   input  logic       rst,                            // system reset signal, asserted high
+   input  logic       key_valid_i,                    // INPUT: assert this signal to transfer a key value to the SIMON core
+   input  logic [7:0] key_i [0:(SIMON_KEY_W/8)-1],    // INPUT: SIMON key to expand
+   output logic       keytab_valid_o,                 // OUTPUT: asserted when the keytab has been fully written
+   output logic [(SIMON_DATA_W/2)-1:0] keytab_o[0:SIMON_ROUNDS - 1], // OUTPUT: key tab external storage to write expanded keytab
+   output logic       ready_o                         // OUTPUT: asserted when the SIMON core is ready for a new request
 );
 
   localparam int unsigned SIMON_ROUNDS_LOG2 = $clog2(SIMON_ROUNDS);
@@ -248,13 +257,18 @@ module simon_core_keyexpand #(
   end  
 endmodule
 
+//
+// SIMON module combinational logic encryptor: given a "keytab_i" key table,
+// "data_i" is encrypted with the SIMON cipher to "data_o" using pure
+// combinational logic, the caller is responsible for latching the results
+//
 module simon_cl_encryptor #(
-   parameter int unsigned SIMON_DATA_W,
-   parameter bit [6:0] SIMON_ROUNDS
+   parameter int unsigned SIMON_DATA_W,           // SIMON data size (in bits), 32, 64, and 128-bits are supported
+   parameter bit [6:0] SIMON_ROUNDS               // SIMON rounds to execute during encryption/decryption
 ) (
-   input  logic [SIMON_DATA_W-1:0] data_i,
-   input  logic [(SIMON_DATA_W/2)-1:0] keytab_i[0:SIMON_ROUNDS - 1],
-   output logic [SIMON_DATA_W-1:0] data_o
+   input  logic [SIMON_DATA_W-1:0] data_i,        // INPUT: SIMON data input to encrypt`
+   input  logic [(SIMON_DATA_W/2)-1:0] keytab_i[0:SIMON_ROUNDS - 1], // INPUT: previously expanded SIMON key table
+   output logic [SIMON_DATA_W-1:0] data_o         // OUTPUT: OUTPUT: SIMON core data output ciphertext
 );
   typedef logic [$clog2(SIMON_ROUNDS+1)-1:0] xy_idx_t;
   logic [(SIMON_DATA_W/2)-1:0] y_words[0:SIMON_ROUNDS]  /*verilator split_var*/;
